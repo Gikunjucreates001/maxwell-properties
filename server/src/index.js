@@ -46,6 +46,7 @@ const configuredOrigins = (process.env.CLIENT_URLS || process.env.CLIENT_URL || 
   .filter(Boolean);
 const deployedFrontendOrigins = process.env.NODE_ENV === 'production'
   ? [
+      'https://maxwell-properties.vercel.app',
       'https://maxwell-properties-gikunjucreates001.vercel.app',
       'https://maxwell-properties-git-main-gikunjucreates001.vercel.app',
     ]
