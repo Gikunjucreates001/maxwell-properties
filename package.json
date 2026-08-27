@@ -1,0 +1,20 @@
+{
+  "name": "maxwell-properties-management",
+  "version": "1.0.0",
+  "description": "Maxwell Properties Management - Track and manage all your rental properties in one place",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "start": "cd server && npm start",
+    "build": "cd client && npm run build"
+  },
+  "dependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "keywords": ["property-management", "rental", "airbnb"],
+  "author": "Maxwell",
+  "license": "MIT"
+}
+
