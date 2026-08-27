@@ -9,7 +9,7 @@
     "client": "cd client && npm run dev",
     "install:all": "npm install && cd server && npm install && cd ../client && npm install",
     "start": "cd server && npm start",
-    "build": "cd client && npm run build",
+    "build": "cd client && npm run build && cd .. && node scripts/prepare-vercel-static.mjs",
     "db:migrate:sqlite": "cd server && npm run db:migrate:sqlite",
     "db:migrate:sqlite:apply": "cd server && npm run db:migrate:sqlite:apply",
     "db:verify": "cd server && npm run db:verify"
