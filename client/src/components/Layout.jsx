@@ -33,11 +33,11 @@ const Layout = ({ children, title }) => {
 
     setIsSavingPassword(true);
     try {
-      await client.post('/auth/change-password', {
+      const response = await client.post('/auth/change-password', {
         currentPassword: passwordForm.currentPassword,
         newPassword: passwordForm.newPassword,
       });
-      toast.success('Password updated successfully');
+      toast.success(response.data?.pending ? 'Password change request sent to the administrator' : 'Password updated successfully');
       setIsPasswordModalOpen(false);
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (error) {
@@ -93,7 +93,7 @@ const Layout = ({ children, title }) => {
 
       <Modal isOpen={isPasswordModalOpen} onClose={() => setIsPasswordModalOpen(false)} title="Change password">
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
-          <p className="text-sm text-gray-600">Use a unique password to keep your property records secure.</p>
+          <p className="text-sm text-gray-600">{user?.role === 'manager' ? 'Your new password will be applied after an administrator approves the request.' : 'Use a unique password to keep your property records secure.'}</p>
           <div>
             <label htmlFor="current-password" className="block text-sm font-medium text-gray-700 mb-1">Current password</label>
             <input id="current-password" type="password" autoComplete="current-password" required value={passwordForm.currentPassword} onChange={(event) => setPasswordForm((form) => ({ ...form, currentPassword: event.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-primary" />

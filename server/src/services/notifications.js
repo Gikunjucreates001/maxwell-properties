@@ -14,6 +14,17 @@ async function queueJob({ tenantId, channel, notificationType, recipient, subjec
   return result.lastInsertRowid;
 }
 
+export async function queueEmail({ recipient, notificationType, subject, body, createdBy }) {
+  return queueJob({
+    channel: 'email',
+    notificationType,
+    recipient,
+    subject,
+    body,
+    createdBy,
+  });
+}
+
 async function deliverNotification(jobId) {
   const db = getDb();
   const job = await db.prepare('SELECT * FROM notification_jobs WHERE id = ?').get(jobId);

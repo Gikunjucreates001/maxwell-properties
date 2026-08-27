@@ -34,7 +34,10 @@ const Login = () => {
   const [managerFailedAttempts, setManagerFailedAttempts] = useState(0);
   const [managerCooldown, setManagerCooldown] = useState(0);
   const [showManagerHelp, setShowManagerHelp] = useState(false);
-  const { login, loginWithGoogle } = useAuth();
+  const [isResetLoading, setIsResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
+  const [managerGoogleBlocked, setManagerGoogleBlocked] = useState(false);
+  const { login, loginWithGoogle, requestPasswordReset } = useAuth();
   const selectedPortal = PORTALS[portal];
 
   useEffect(() => {
@@ -51,6 +54,23 @@ const Login = () => {
     setManagerFailedAttempts(0);
     setManagerCooldown(0);
     setShowManagerHelp(false);
+    setResetMessage('');
+    setManagerGoogleBlocked(false);
+  };
+
+  const handleForgotPassword = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setResetMessage('Enter your email address first.');
+      return;
+    }
+    setIsResetLoading(true);
+    const result = await requestPasswordReset(normalizedEmail, portal);
+    setIsResetLoading(false);
+    if (result?.success) {
+      if (portal === 'manager') setManagerGoogleBlocked(true);
+      setResetMessage(result.message || 'Your request has been received.');
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -180,10 +200,15 @@ const Login = () => {
               </div>
               {portal === 'manager' && showManagerHelp && (
                 <p className="mt-2 text-right text-xs text-slate-400">
-                  Forgot your password? Ask an administrator for help.
                   {managerCooldown > 0 && <span className="ml-1 text-primary">Try again in {formatCooldown(managerCooldown)}.</span>}
                 </p>
               )}
+              <div className="mt-2 flex justify-end">
+                <button type="button" onClick={handleForgotPassword} disabled={isResetLoading} className="text-xs font-semibold text-slate-400 underline-offset-2 transition hover:text-white hover:underline disabled:opacity-60">
+                  {isResetLoading ? 'Sending request…' : 'Forgot password?'}
+                </button>
+              </div>
+              {resetMessage && <p className="mt-2 rounded-md bg-primary/10 px-3 py-2 text-xs leading-5 text-slate-300" role="status">{resetMessage}</p>}
             </div>
 
             <button
@@ -202,7 +227,10 @@ const Login = () => {
             <span className="h-px flex-1 bg-white/10" />
           </div>
 
-          <GoogleSignInButton onCredential={handleGoogleCredential} disabled={isLoading || isGoogleLoading} />
+          {portal === 'manager' && managerGoogleBlocked && (
+            <p className="mb-3 text-center text-xs leading-5 text-slate-400" role="status">Google sign-in is unavailable while your reset request awaits admin approval.</p>
+          )}
+          <GoogleSignInButton onCredential={handleGoogleCredential} disabled={isLoading || isGoogleLoading || (portal === 'manager' && managerGoogleBlocked)} />
         </section>
       </div>
     </main>

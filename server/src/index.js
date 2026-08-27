@@ -65,10 +65,19 @@ const loginLimiter = rateLimit({
   max: 5, // Limit each IP to 5 requests per windowMs
   message: { success: false, error: 'Too many login attempts from this IP, please try again after 15 minutes' }
 });
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many password reset attempts. Please try again later.' },
+});
 
 // Routes
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth/google', loginLimiter);
+app.use('/api/auth/password-reset/request', passwordResetLimiter);
+app.use('/api/auth/password-reset/complete', passwordResetLimiter);
 app.use('/api/auth', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();

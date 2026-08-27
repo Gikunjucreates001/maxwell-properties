@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { closeDb, getDb, initDb } from './database.js';
+import { getPrimaryAdminEmail } from './services/passwordResets.js';
 
-const EXPECTED_TABLES = ['users', 'properties', 'units', 'tenants', 'payments', 'issues', 'expenses', 'approval_requests', 'approval_comments', 'notification_jobs'];
+const EXPECTED_TABLES = ['users', 'properties', 'units', 'tenants', 'payments', 'issues', 'expenses', 'approval_requests', 'approval_comments', 'notification_jobs', 'password_reset_requests'];
 
 async function verify() {
   await initDb({ bootstrap: false });
@@ -25,6 +26,15 @@ async function verify() {
     `).all(EXPECTED_TABLES);
     const rlsDisabled = rlsRows.filter((row) => !row.rls_enabled).map((row) => row.table_name);
     if (rlsDisabled.length) throw new Error(`RLS is disabled on: ${rlsDisabled.join(', ')}`);
+
+    const admins = await db.prepare("SELECT id, email, auth_user_id FROM users WHERE role = 'admin' ORDER BY id").all();
+    const primaryEmail = getPrimaryAdminEmail();
+    if (admins.length !== 1 || admins[0].email !== primaryEmail) {
+      throw new Error(`Primary admin verification failed: expected exactly one admin (${primaryEmail}), found ${admins.length ? admins.map((admin) => admin.email).join(', ') : 'none'}`);
+    }
+    if (process.env.PRIMARY_ADMIN_UID && admins[0].auth_user_id !== process.env.PRIMARY_ADMIN_UID) {
+      throw new Error('Primary admin verification failed: the configured Supabase Auth UID is not linked to the admin record');
+    }
 
     const invalidActiveTenants = await db.prepare(`
       SELECT COUNT(*) AS count

@@ -75,6 +75,8 @@ To enable Google sign-in, create a Google Identity Services web client ID, add i
 
 Email and SMS delivery use an outbox table so a missing provider does not interrupt payment recording. Configure Resend with `RESEND_API_KEY` and `EMAIL_FROM`, and/or Twilio with `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER`. Until configured, jobs are recorded as failed with a clear provider error for later setup.
 
+Manager password changes are approval-controlled. A manager can request a reset from the login screen or from **Change password**; the request appears on the admin **Managers** page. The administrator approves or rejects it, and approval queues a one-time reset link to the manager's email. Google sign-in is blocked for that manager while the request is pending or approved. The administrator can request their own reset link from the admin login screen, which is sent directly to the configured owner email.
+
 To enable the daily month-end reminder check, set `ENABLE_AUTOMATIC_REMINDERS=true` and optionally change `REMINDER_DAY_OF_MONTH` and `REMINDER_MESSAGE`.
 
 New or changed passwords must be 6–20 characters and include a lowercase letter, an uppercase letter, a number, and a symbol.
@@ -82,6 +84,14 @@ New or changed passwords must be 6–20 characters and include a lowercase lette
 ### Production security configuration
 
 In production, configure four different signing secrets: `ADMIN_JWT_SECRET`, `MANAGER_JWT_SECRET`, `ADMIN_JWT_REFRESH_SECRET`, and `MANAGER_JWT_REFRESH_SECRET`. The API refuses to start when they are missing. Use long, random values, keep them server-side, and rotate them during a planned session reset. `JWT_SECRET` and `JWT_REFRESH_SECRET` remain local-development fallbacks only.
+
+The production owner account is controlled by `PRIMARY_ADMIN_EMAIL` and `PRIMARY_ADMIN_UID`. For this workspace they are set to `pnganga0133@gmail.com` and `de5516ae-cc87-4061-912f-0971cb40b102`. After applying the Supabase migrations and transferring the legacy data, run:
+
+```bash
+npm run db:normalize-admin
+```
+
+This keeps exactly one active admin. If the requested email is not in `users` and there is one legacy admin, its existing password and history are reassigned to the requested owner email. If there are referenced historical records, the old admin is retained only as an inactive manager record so audit history and foreign-key relationships are not destroyed. If no admin exists, set `PRIMARY_ADMIN_PASSWORD` once so the script can create the owner account; remove that environment variable afterward.
 
 ### Vercel project settings
 

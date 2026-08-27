@@ -7,7 +7,8 @@
     "dev": "node --watch src/index.js",
     "db:migrate:sqlite": "node src/migrate-sqlite-to-supabase.js",
     "db:migrate:sqlite:apply": "node src/migrate-sqlite-to-supabase.js --apply",
-    "db:verify": "node src/verify-supabase.js"
+    "db:verify": "node src/verify-supabase.js",
+    "db:normalize-admin": "node src/normalize-primary-admin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

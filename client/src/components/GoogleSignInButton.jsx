@@ -10,7 +10,11 @@ const GoogleSignInButton = ({ onCredential, disabled = false }) => {
   callbackRef.current = onCredential;
 
   useEffect(() => {
-    if (!clientId || disabled) return undefined;
+    if (!clientId) return undefined;
+    if (disabled) {
+      if (buttonRef.current) buttonRef.current.innerHTML = '';
+      return undefined;
+    }
 
     const renderButton = () => {
       if (!window.google?.accounts?.id || !buttonRef.current) return;
@@ -44,7 +48,7 @@ const GoogleSignInButton = ({ onCredential, disabled = false }) => {
     script.onerror = () => toast.error('Google sign-in could not be loaded');
     document.head.appendChild(script);
     return () => script.remove();
-  }, [clientId]);
+  }, [clientId, disabled]);
 
   if (!clientId) {
     return (

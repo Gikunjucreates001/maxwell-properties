@@ -12,7 +12,8 @@
     "build": "cd client && npm run build && cd .. && node scripts/prepare-vercel-static.mjs",
     "db:migrate:sqlite": "cd server && npm run db:migrate:sqlite",
     "db:migrate:sqlite:apply": "cd server && npm run db:migrate:sqlite:apply",
-    "db:verify": "cd server && npm run db:verify"
+    "db:verify": "cd server && npm run db:verify",
+    "db:normalize-admin": "cd server && npm run db:normalize-admin"
   },
   "dependencies": {
     "concurrently": "^9.0.1"

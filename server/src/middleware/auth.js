@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { getDb } from '../database.js';
+import { getPrimaryAdminEmail } from '../services/passwordResets.js';
 
 const DEVELOPMENT_SECRET = 'maxwell-props-secret-key-2024';
 
@@ -60,6 +61,9 @@ export async function authenticateToken(req, res, next) {
   }
   if (!account || !account.is_active) {
     return res.status(401).json({ success: false, error: 'User account is inactive or no longer exists' });
+  }
+  if (account.role === 'admin' && account.email !== getPrimaryAdminEmail()) {
+    return res.status(401).json({ success: false, error: 'Administrator access is restricted to the primary owner account' });
   }
   try {
     // Once the account is known, verify the token against that role's key. This

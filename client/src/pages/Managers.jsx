@@ -5,7 +5,7 @@ import PasswordRequirements from '../components/PasswordRequirements';
 import StatusBadge from '../components/StatusBadge';
 import client from '../api/client';
 import { validatePassword } from '../utils/passwordPolicy';
-import { Edit, Loader2, Plus, ShieldCheck, UserRound, UserRoundX } from 'lucide-react';
+import { Check, Edit, KeyRound, Loader2, Plus, ShieldCheck, UserRound, UserRoundX, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const emptyForm = { name: '', email: '', password: '' };
@@ -18,9 +18,12 @@ const Managers = () => {
   const [formData, setFormData] = useState(emptyForm);
   const [isSaving, setIsSaving] = useState(false);
   const [workingId, setWorkingId] = useState(null);
+  const [resetRequests, setResetRequests] = useState([]);
+  const [workingResetId, setWorkingResetId] = useState(null);
 
   useEffect(() => {
     fetchManagers();
+    fetchResetRequests();
   }, []);
 
   const fetchManagers = async () => {
@@ -32,6 +35,28 @@ const Managers = () => {
       toast.error(error.response?.data?.error || 'Failed to load managers');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchResetRequests = async () => {
+    try {
+      const response = await client.get('/auth/password-reset/requests');
+      if (response.data.success) setResetRequests(response.data.data);
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to load password reset requests');
+    }
+  };
+
+  const reviewResetRequest = async (request, decision) => {
+    setWorkingResetId(request.id);
+    try {
+      const response = await client.post(`/auth/password-reset/requests/${request.id}/${decision}`, decision === 'reject' ? { review_note: 'Reset request declined by the administrator' } : {});
+      if (response.data.success) toast.success(response.data.data.message);
+      fetchResetRequests();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Unable to review password reset request');
+    } finally {
+      setWorkingResetId(null);
     }
   };
 
@@ -96,6 +121,35 @@ const Managers = () => {
           <Plus size={18} /> Add manager
         </button>
       </div>
+
+      {resetRequests.length > 0 && (
+        <section className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm" aria-labelledby="password-reset-requests-title">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"><KeyRound size={20} /></div>
+            <div>
+              <h2 id="password-reset-requests-title" className="font-semibold text-gray-900">Password reset requests</h2>
+              <p className="mt-1 text-sm text-gray-600">Review manager requests here. Approving sends a one-time reset link to the manager’s email.</p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-3">
+            {resetRequests.map((request) => (
+              <div key={request.id} className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-medium text-gray-900">{request.requester_name}</p>
+                  <p className="text-sm text-gray-500">{request.requester_email} · Requested {new Date(request.requested_at).toLocaleString()}</p>
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-amber-700">{request.status === 'approved' ? 'Reset email sent' : 'Awaiting approval'}</p>
+                </div>
+                {request.status === 'pending' && (
+                  <div className="flex shrink-0 gap-2">
+                    <button type="button" onClick={() => reviewResetRequest(request, 'approve')} disabled={workingResetId === request.id} className="inline-flex items-center gap-1 rounded-md bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"><Check size={15} /> Approve</button>
+                    <button type="button" onClick={() => reviewResetRequest(request, 'reject')} disabled={workingResetId === request.id} className="inline-flex items-center gap-1 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"><X size={15} /> Reject</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {loading ? (
         <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>

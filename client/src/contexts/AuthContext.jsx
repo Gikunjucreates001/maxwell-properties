@@ -67,6 +67,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const requestPasswordReset = async (email, portal = 'admin') => {
+    try {
+      const res = await client.post('/auth/password-reset/request', { email, portal });
+      return { success: true, message: res.data?.data?.message };
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Unable to request a password reset');
+      return { success: false, status: error.response?.status };
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
@@ -80,6 +90,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     login,
     loginWithGoogle,
+    requestPasswordReset,
     logout,
     isAuthenticated: !!user,
   };
