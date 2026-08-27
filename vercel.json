@@ -1,6 +1,0 @@
-{
-  "installCommand": "npm install && npm --prefix client install",
-  "buildCommand": "npm --prefix client run build",
-  "outputDirectory": "client/dist",
-  "framework": null
-}
