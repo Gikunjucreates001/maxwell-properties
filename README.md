@@ -83,14 +83,9 @@ New or changed passwords must be 6–20 characters and include a lowercase lette
 
 In production, configure four different signing secrets: `ADMIN_JWT_SECRET`, `MANAGER_JWT_SECRET`, `ADMIN_JWT_REFRESH_SECRET`, and `MANAGER_JWT_REFRESH_SECRET`. The API refuses to start when they are missing. Use long, random values, keep them server-side, and rotate them during a planned session reset. `JWT_SECRET` and `JWT_REFRESH_SECRET` remain local-development fallbacks only.
 
-### Default Login Credentials
+### First administrator
 
-| Field | Value |
-|-------|-------|
-| Email | `maxwell@properties.com` |
-| Password | `Maxwell@2024!` |
-
-> ⚠️ **Change the default password after first login!**
+Local development creates a convenience administrator account when the database is empty. Production does not create a publicly known default account: set `INITIAL_ADMIN_EMAIL` and a strong `INITIAL_ADMIN_PASSWORD` before starting a new production database. The password must be 6–20 characters and include a lowercase letter, an uppercase letter, a number, and a symbol. Keep both values private and remove the bootstrap password from the deployment environment after the first administrator has been created.
 
 ## Project Structure
 
