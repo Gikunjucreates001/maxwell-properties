@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
+import { validatePassword } from './utils/validation.js';
 
 let dbInstance = null;
 
@@ -318,14 +319,28 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_notification_jobs_tenant_id ON notification_jobs(tenant_id);
   `);
 
-  // Seed Admin User
-  const userCheck = db.prepare('SELECT count(*) as count FROM users WHERE email = ?').get('maxwell@properties.com');
+  // Seed a development admin only. Production must receive an explicit bootstrap account.
+  const isProduction = process.env.NODE_ENV === 'production';
+  const initialAdminEmail = (typeof process.env.INITIAL_ADMIN_EMAIL === 'string'
+    ? process.env.INITIAL_ADMIN_EMAIL
+    : isProduction ? '' : 'maxwell@properties.com').trim().toLowerCase();
+  const initialAdminPassword = typeof process.env.INITIAL_ADMIN_PASSWORD === 'string'
+    ? process.env.INITIAL_ADMIN_PASSWORD
+    : isProduction ? '' : 'Maxwell@2024!';
+  const userCheck = db.prepare('SELECT count(*) as count FROM users WHERE role = ?').get('admin');
   if (userCheck.count === 0) {
-    const hash = bcrypt.hashSync('Maxwell@2024!', 12);
+    if (!initialAdminEmail || !initialAdminPassword) {
+      throw new Error('No administrator account exists. Set INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD before starting production.');
+    }
+    const passwordError = validatePassword(initialAdminPassword);
+    if (passwordError) {
+      throw new Error(`INITIAL_ADMIN_PASSWORD is not strong enough: ${passwordError}`);
+    }
+    const hash = bcrypt.hashSync(initialAdminPassword, 12);
     db.prepare(`
       INSERT INTO users (email, password_hash, name, role) 
       VALUES (?, ?, ?, ?)
-    `).run('maxwell@properties.com', hash, 'Maxwell', 'admin');
+    `).run(initialAdminEmail, hash, 'Maxwell', 'admin');
   }
 
   // Seed Properties
