@@ -30,7 +30,7 @@ A full-stack property management application for tracking and managing all your 
 ## Tech Stack
 
 - **Frontend:** React 18, Vite, Tailwind CSS, Recharts
-- **Backend:** Node.js, Express, SQLite
+- **Backend:** Node.js, Express, Supabase Postgres
 - **Auth:** JWT + bcrypt
 
 ## Quick Start
@@ -83,9 +83,42 @@ New or changed passwords must be 6–20 characters and include a lowercase lette
 
 In production, configure four different signing secrets: `ADMIN_JWT_SECRET`, `MANAGER_JWT_SECRET`, `ADMIN_JWT_REFRESH_SECRET`, and `MANAGER_JWT_REFRESH_SECRET`. The API refuses to start when they are missing. Use long, random values, keep them server-side, and rotate them during a planned session reset. `JWT_SECRET` and `JWT_REFRESH_SECRET` remain local-development fallbacks only.
 
+### Supabase database setup and SQLite transfer
+
+The application now uses Supabase Postgres through a server-only connection. Add the Supabase Postgres connection string to `SUPABASE_DB_URL` (the pooled connection string is recommended for a hosted API), keep `SUPABASE_DB_SSL=true` and `SUPABASE_DB_SSL_REJECT_UNAUTHORIZED=true`, and never add this value to any `VITE_*` client variable. Only disable certificate verification for a deliberate local troubleshooting session.
+
+Apply the database migration to the linked Supabase project with the Supabase CLI:
+
+```bash
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push
+```
+
+Keep the existing SQLite file until the transfer has been verified. From the `server` directory, run a read-only transfer check first:
+
+```bash
+npm run db:migrate:sqlite
+```
+
+The check reads the legacy SQLite database and rolls back all target writes. When the counts and connection are correct, apply the transfer:
+
+```bash
+npm run db:migrate:sqlite:apply
+```
+
+The transfer runs in one Postgres transaction, preserves record IDs and relationships, restores sequences, and verifies row counts after commit. It is safe to re-run for an interrupted transfer because records are upserted by their original IDs. Start the API only after the schema is applied and the transfer is complete. Existing SQLite files are retained as a rollback/archive source; they are not used by the running API.
+
+After the transfer, run the read-only integrity check:
+
+```bash
+npm run db:verify
+```
+
+It confirms that all application tables exist, RLS is enabled, and active apartment tenants do not point to missing or maintenance units.
+
 ### First administrator
 
-Local development creates a convenience administrator account when the database is empty. Production does not create a publicly known default account: set `INITIAL_ADMIN_EMAIL` and a strong `INITIAL_ADMIN_PASSWORD` before starting a new production database. The password must be 6–20 characters and include a lowercase letter, an uppercase letter, a number, and a symbol. Keep both values private and remove the bootstrap password from the deployment environment after the first administrator has been created.
+When a new Supabase database has no users, the API requires `INITIAL_ADMIN_EMAIL` and a strong `INITIAL_ADMIN_PASSWORD` before it will start. The password must be 6–20 characters and include a lowercase letter, an uppercase letter, a number, and a symbol. Keep both values private and remove the bootstrap password from the deployment environment after the first administrator has been created. A database migrated from SQLite already contains its existing administrator accounts and does not need the bootstrap variables.
 
 ## Project Structure
 
@@ -96,7 +129,8 @@ maxwell-properties-management/
 ├── server/               # Express.js backend
 │   ├── src/
 │   │   ├── index.js      # Server entry point
-│   │   ├── database.js   # SQLite setup & seed data
+│   │   ├── database.js   # Supabase Postgres connection and bootstrap
+│   │   ├── migrate-sqlite-to-supabase.js # One-time legacy data transfer
 │   │   ├── middleware/    # Auth middleware
 │   │   └── routes/       # API routes
 │   └── data/             # SQLite database file
@@ -141,6 +175,7 @@ maxwell-properties-management/
 - Explicit CORS origin allowlist
 - Helmet.js security headers
 - Parameterized SQL queries (injection prevention)
+- Supabase tables protected by RLS with direct browser table access revoked
 - Separate admin and manager token signing keys in production
 - Live account status and role checks on every authenticated request
 

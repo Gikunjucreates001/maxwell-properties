@@ -31,7 +31,7 @@ function verifyWithSecrets(token, secrets) {
   throw lastError || new Error('No token verification secret is configured');
 }
 
-export function authenticateToken(req, res, next) {
+export async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -51,7 +51,13 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ success: false, error: 'Invalid or expired token' });
   }
 
-  const account = getDb().prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(user.id);
+  let account;
+  try {
+    account = await getDb().prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(user.id);
+  } catch (error) {
+    console.error('Authentication lookup error:', error);
+    return res.status(503).json({ success: false, error: 'Authentication service is temporarily unavailable' });
+  }
   if (!account || !account.is_active) {
     return res.status(401).json({ success: false, error: 'User account is inactive or no longer exists' });
   }

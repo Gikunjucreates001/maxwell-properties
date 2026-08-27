@@ -25,8 +25,8 @@ function buildUnitPayload(body, current = {}) {
   };
 }
 
-function validateUnit(db, payload) {
-  const property = db.prepare('SELECT id, type FROM properties WHERE id = ?').get(payload.property_id);
+async function validateUnit(db, payload) {
+  const property = await db.prepare('SELECT id, type FROM properties WHERE id = ?').get(payload.property_id);
   if (!property) return 'Selected property was not found';
   if (!isApartmentProperty(property.type)) return 'House units are only available for apartment properties';
   if (!payload.house_id) return 'House ID is required';
@@ -37,22 +37,22 @@ function validateUnit(db, payload) {
   return null;
 }
 
-function createOrUpdateUnit(db, payload, id = null) {
+async function createOrUpdateUnit(db, payload, id = null) {
   if (id == null) {
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO units (property_id, house_id, rent_amount, water_billing_type, water_rate, water_notes, status)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(payload.property_id, payload.house_id, payload.rent_amount, payload.water_billing_type, payload.water_rate, payload.water_notes, payload.status);
     return result.lastInsertRowid;
   }
-  if (payload.status === 'maintenance' && db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active'").get(id)) throw new Error('An occupied unit cannot be placed under maintenance');
-  db.prepare(`
+  if (payload.status === 'maintenance' && await db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active'").get(id)) throw new Error('An occupied unit cannot be placed under maintenance');
+  await db.prepare(`
     UPDATE units SET property_id = ?, house_id = ?, rent_amount = ?, water_billing_type = ?, water_rate = ?, water_notes = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
   `).run(payload.property_id, payload.house_id, payload.rent_amount, payload.water_billing_type, payload.water_rate, payload.water_notes, payload.status, id);
   return id;
 }
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const params = [];
     let query = unitSelect + ' WHERE 1 = 1';
@@ -61,19 +61,19 @@ router.get('/', (req, res) => {
       params.push(req.query.property_id);
     }
     query += ' ORDER BY u.house_id COLLATE NOCASE ASC';
-    res.json({ success: true, data: getDb().prepare(query).all(...params) });
+    res.json({ success: true, data: await getDb().prepare(query).all(...params) });
   } catch (error) {
     console.error('Get units error:', error);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-router.get('/available', (req, res) => {
+router.get('/available', async (req, res) => {
   try {
-    const property = getDb().prepare('SELECT id, type FROM properties WHERE id = ?').get(req.query.property_id);
+    const property = await getDb().prepare('SELECT id, type FROM properties WHERE id = ?').get(req.query.property_id);
     if (!property) return res.status(404).json({ success: false, error: 'Property not found' });
     if (!isApartmentProperty(property.type)) return res.json({ success: true, data: [] });
-    const units = getDb().prepare(`${unitSelect} WHERE u.property_id = ? AND u.status = 'ready' AND t.id IS NULL ORDER BY u.house_id COLLATE NOCASE ASC`).all(property.id);
+    const units = await getDb().prepare(`${unitSelect} WHERE u.property_id = ? AND u.status = 'ready' AND t.id IS NULL ORDER BY u.house_id COLLATE NOCASE ASC`).all(property.id);
     res.json({ success: true, data: units });
   } catch (error) {
     console.error('Get available units error:', error);
@@ -81,58 +81,58 @@ router.get('/available', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const payload = buildUnitPayload(req.body || {});
-    const validationError = validateUnit(db, payload);
+    const validationError = await validateUnit(db, payload);
     if (validationError) return res.status(400).json({ success: false, error: validationError });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'unit', action: 'create', payload, reason: `Create house unit ${payload.house_id}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'unit', action: 'create', payload, reason: `Create house unit ${payload.house_id}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Unit submitted for admin approval' });
     }
-    const id = createOrUpdateUnit(db, payload);
-    res.status(201).json({ success: true, data: db.prepare(`${unitSelect} WHERE u.id = ?`).get(id) });
+    const id = await createOrUpdateUnit(db, payload);
+    res.status(201).json({ success: true, data: await db.prepare(`${unitSelect} WHERE u.id = ?`).get(id) });
   } catch (error) {
-    if (String(error.message).includes('UNIQUE constraint failed')) return res.status(409).json({ success: false, error: 'That House ID already exists in this property' });
+    if (error.code === '23505' || String(error.message).includes('UNIQUE constraint failed')) return res.status(409).json({ success: false, error: 'That House ID already exists in this property' });
     console.error('Create unit error:', error);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const current = db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id);
+    const current = await db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id);
     if (!current) return res.status(404).json({ success: false, error: 'House unit not found' });
     const payload = buildUnitPayload(req.body || {}, current);
-    const validationError = validateUnit(db, payload);
+    const validationError = await validateUnit(db, payload);
     if (validationError) return res.status(400).json({ success: false, error: validationError });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'unit', entityId: current.id, action: 'update', payload, reason: `Update house unit ${current.house_id}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'unit', entityId: current.id, action: 'update', payload, reason: `Update house unit ${current.house_id}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Unit update submitted for admin approval' });
     }
-    const id = createOrUpdateUnit(db, payload, current.id);
-    res.json({ success: true, data: db.prepare(`${unitSelect} WHERE u.id = ?`).get(id) });
+    const id = await createOrUpdateUnit(db, payload, current.id);
+    res.json({ success: true, data: await db.prepare(`${unitSelect} WHERE u.id = ?`).get(id) });
   } catch (error) {
-    if (String(error.message).includes('UNIQUE constraint failed')) return res.status(409).json({ success: false, error: 'That House ID already exists in this property' });
+    if (error.code === '23505' || String(error.message).includes('UNIQUE constraint failed')) return res.status(409).json({ success: false, error: 'That House ID already exists in this property' });
     console.error('Update unit error:', error);
     res.status(500).json({ success: false, error: error.message || 'Internal server error' });
   }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id);
+    const unit = await db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id);
     if (!unit) return res.status(404).json({ success: false, error: 'House unit not found' });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'unit', entityId: unit.id, action: 'delete', payload: {}, reason: `Delete house unit ${unit.house_id}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'unit', entityId: unit.id, action: 'delete', payload: {}, reason: `Delete house unit ${unit.house_id}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Unit deletion submitted for admin approval' });
     }
-    if (db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active'").get(unit.id)) return res.status(400).json({ success: false, error: 'Cannot delete an occupied unit' });
-    if (db.prepare('SELECT id FROM expenses WHERE unit_id = ?').get(unit.id)) return res.status(400).json({ success: false, error: 'Cannot delete a unit with expense history' });
-    db.prepare('DELETE FROM units WHERE id = ?').run(unit.id);
+    if (await db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active'").get(unit.id)) return res.status(400).json({ success: false, error: 'Cannot delete an occupied unit' });
+    if (await db.prepare('SELECT id FROM expenses WHERE unit_id = ?').get(unit.id)) return res.status(400).json({ success: false, error: 'Cannot delete a unit with expense history' });
+    await db.prepare('DELETE FROM units WHERE id = ?').run(unit.id);
     res.json({ success: true, data: { message: 'House unit deleted successfully' } });
   } catch (error) {
     console.error('Delete unit error:', error);

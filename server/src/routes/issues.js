@@ -14,7 +14,7 @@ import {
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const db = getDb();
     const { property_id, status, priority } = req.query;
@@ -43,7 +43,7 @@ router.get('/', (req, res) => {
 
     query += ` ORDER BY i.created_at DESC`;
 
-    const issues = db.prepare(query).all(...params);
+    const issues = await db.prepare(query).all(...params);
     res.json({ success: true, data: issues });
   } catch (error) {
     console.error('Get issues error:', error);
@@ -51,12 +51,12 @@ router.get('/', (req, res) => {
   }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
     
-    const issue = db.prepare(`
+    const issue = await db.prepare(`
       SELECT i.*, p.name as property_name, u.house_id
       FROM issues i
       LEFT JOIN properties p ON i.property_id = p.id
@@ -75,7 +75,7 @@ router.get('/:id', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const { property_id } = req.body || {};
@@ -93,7 +93,7 @@ router.post('/', (req, res) => {
     if (!property_id || !title) {
       return res.status(400).json({ success: false, error: 'Property ID and title are required' });
     }
-    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
+    if (!await db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
       return res.status(400).json({ success: false, error: 'Selected property was not found' });
     }
     if (!ISSUE_PRIORITIES.includes(priority) || !ISSUE_STATUSES.includes(status) || !ISSUE_CATEGORIES.includes(category)) {
@@ -103,27 +103,27 @@ router.post('/', (req, res) => {
       return res.status(400).json({ success: false, error: 'Issue dates must use a valid date' });
     }
     if (repairCost.error) return res.status(400).json({ success: false, error: 'Repair cost is required and must be zero or more' });
-    const property = db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
+    const property = await db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
     if (isApartmentProperty(property.type)) {
-      if (!unit_id || !Number.isInteger(unit_id) || !db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(unit_id, property_id)) return res.status(400).json({ success: false, error: 'Choose the House ID affected by this issue' });
+      if (!unit_id || !Number.isInteger(unit_id) || !await db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(unit_id, property_id)) return res.status(400).json({ success: false, error: 'Choose the House ID affected by this issue' });
     } else if (unit_id) {
       return res.status(400).json({ success: false, error: 'Airbnb issues do not use House IDs' });
     }
     const finalResolvedDate = (status === 'resolved' || status === 'closed') && !resolved_date ? today() : resolved_date;
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO issues (property_id, unit_id, title, description, priority, status, category, reported_date, resolved_date, notes, repair_cost)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(property_id, unit_id, title, description, priority, status, category, reported_date, finalResolvedDate, notes, repairCost.value);
     if (repairCost.value > 0) {
-      const expense = db.prepare(`
+      const expense = await db.prepare(`
         INSERT INTO expenses (property_id, unit_id, issue_id, category, description, amount, expense_date, notes, created_by)
         VALUES (?, ?, ?, 'repair', ?, ?, ?, ?, ?)
       `).run(property_id, unit_id, result.lastInsertRowid, `Repair: ${title}`, repairCost.value, reported_date, notes, req.user.id);
-      db.prepare('UPDATE issues SET expense_id = ? WHERE id = ?').run(expense.lastInsertRowid, result.lastInsertRowid);
+      await db.prepare('UPDATE issues SET expense_id = ? WHERE id = ?').run(expense.lastInsertRowid, result.lastInsertRowid);
     }
 
-    const newIssue = db.prepare(`
+    const newIssue = await db.prepare(`
       SELECT i.*, p.name as property_name, u.house_id
       FROM issues i
       LEFT JOIN properties p ON i.property_id = p.id
@@ -138,11 +138,11 @@ router.post('/', (req, res) => {
   }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const currentIssue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
+    const currentIssue = await db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
     if (!currentIssue) {
       return res.status(404).json({ success: false, error: 'Issue not found' });
     }
@@ -162,7 +162,7 @@ router.put('/:id', (req, res) => {
     if (!property_id || !title) {
       return res.status(400).json({ success: false, error: 'Property ID and title are required' });
     }
-    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
+    if (!await db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
       return res.status(400).json({ success: false, error: 'Selected property was not found' });
     }
     if (!ISSUE_PRIORITIES.includes(priority) || !ISSUE_STATUSES.includes(status) || !ISSUE_CATEGORIES.includes(category)) {
@@ -174,19 +174,19 @@ router.put('/:id', (req, res) => {
     if ((status === 'resolved' || status === 'closed') && !resolved_date) resolved_date = today();
     if (status !== 'resolved' && status !== 'closed') resolved_date = null;
     if (repairCost.error) return res.status(400).json({ success: false, error: 'Repair cost is required and must be zero or more' });
-    const property = db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
+    const property = await db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
     if (isApartmentProperty(property.type)) {
-      if (!unit_id || !Number.isInteger(unit_id) || !db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(unit_id, property_id)) return res.status(400).json({ success: false, error: 'Choose the House ID affected by this issue' });
+      if (!unit_id || !Number.isInteger(unit_id) || !await db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(unit_id, property_id)) return res.status(400).json({ success: false, error: 'Choose the House ID affected by this issue' });
     } else if (unit_id) {
       return res.status(400).json({ success: false, error: 'Airbnb issues do not use House IDs' });
     }
     const payload = { property_id: Number(property_id), unit_id, title, description, priority, status, category, reported_date, resolved_date, notes, repair_cost: repairCost.value };
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'issue', entityId: id, action: 'update', payload, reason: `Update maintenance issue ${title}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'issue', entityId: id, action: 'update', payload, reason: `Update maintenance issue ${title}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Issue update submitted for admin approval' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE issues
       SET property_id = ?, unit_id = ?, title = ?, description = ?, priority = ?, status = ?, category = ?, reported_date = ?, resolved_date = ?, notes = ?, repair_cost = ?
       WHERE id = ?
@@ -197,17 +197,17 @@ router.put('/:id', (req, res) => {
     }
 
     if (currentIssue.expense_id) {
-      if (repairCost.value > 0) db.prepare('UPDATE expenses SET property_id = ?, unit_id = ?, description = ?, amount = ?, expense_date = ?, notes = ? WHERE id = ?').run(property_id, unit_id, `Repair: ${title}`, repairCost.value, reported_date, notes, currentIssue.expense_id);
-      else db.prepare('DELETE FROM expenses WHERE id = ?').run(currentIssue.expense_id);
+      if (repairCost.value > 0) await db.prepare('UPDATE expenses SET property_id = ?, unit_id = ?, description = ?, amount = ?, expense_date = ?, notes = ? WHERE id = ?').run(property_id, unit_id, `Repair: ${title}`, repairCost.value, reported_date, notes, currentIssue.expense_id);
+      else await db.prepare('DELETE FROM expenses WHERE id = ?').run(currentIssue.expense_id);
     } else if (repairCost.value > 0) {
-      const expense = db.prepare(`
+      const expense = await db.prepare(`
         INSERT INTO expenses (property_id, unit_id, issue_id, category, description, amount, expense_date, notes, created_by)
         VALUES (?, ?, ?, 'repair', ?, ?, ?, ?, ?)
       `).run(property_id, unit_id, id, `Repair: ${title}`, repairCost.value, reported_date, notes, req.user.id);
-      db.prepare('UPDATE issues SET expense_id = ? WHERE id = ?').run(expense.lastInsertRowid, id);
+      await db.prepare('UPDATE issues SET expense_id = ? WHERE id = ?').run(expense.lastInsertRowid, id);
     }
 
-    const updatedIssue = db.prepare(`
+    const updatedIssue = await db.prepare(`
       SELECT i.*, p.name as property_name 
       FROM issues i
       LEFT JOIN properties p ON i.property_id = p.id
@@ -221,18 +221,18 @@ router.put('/:id', (req, res) => {
   }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
+    const issue = await db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
     if (!issue) return res.status(404).json({ success: false, error: 'Issue not found' });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'issue', entityId: id, action: 'delete', payload: {}, reason: `Delete maintenance issue ${issue.title}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'issue', entityId: id, action: 'delete', payload: {}, reason: `Delete maintenance issue ${issue.title}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Issue deletion submitted for admin approval' });
     }
     
-    const result = db.prepare('DELETE FROM issues WHERE id = ?').run(id);
+    const result = await db.prepare('DELETE FROM issues WHERE id = ?').run(id);
     if (result.changes === 0) {
       return res.status(404).json({ success: false, error: 'Issue not found' });
     }

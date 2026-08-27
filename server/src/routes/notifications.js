@@ -4,10 +4,10 @@ import { queueMonthEndReminders, queueOverdueMessages } from '../services/notifi
 
 const router = express.Router();
 
-router.get('/jobs', (req, res) => {
+router.get('/jobs', async (req, res) => {
   try {
     const db = getDb();
-    const jobs = db.prepare(`
+    const jobs = await db.prepare(`
       SELECT nj.*, t.name as tenant_name, creator.name as creator_name
       FROM notification_jobs nj
       LEFT JOIN tenants t ON t.id = nj.tenant_id
@@ -21,11 +21,11 @@ router.get('/jobs', (req, res) => {
   }
 });
 
-router.post('/overdue', (req, res) => {
+router.post('/overdue', async (req, res) => {
   try {
     const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
     if (!message) return res.status(400).json({ success: false, error: 'Message is required' });
-    const result = queueOverdueMessages({ message, createdBy: req.user.id });
+    const result = await queueOverdueMessages({ message, createdBy: req.user.id });
     res.status(201).json({ success: true, data: result, message: `Message queued for ${result.tenantCount} overdue tenant${result.tenantCount === 1 ? '' : 's'}` });
   } catch (error) {
     console.error('Queue overdue messages error:', error);
@@ -33,11 +33,11 @@ router.post('/overdue', (req, res) => {
   }
 });
 
-router.post('/month-end', (req, res) => {
+router.post('/month-end', async (req, res) => {
   try {
     const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
     if (!message) return res.status(400).json({ success: false, error: 'Message is required' });
-    const result = queueMonthEndReminders({ message, createdBy: req.user.id });
+    const result = await queueMonthEndReminders({ message, createdBy: req.user.id });
     res.status(201).json({ success: true, data: result, message: `Reminder queued for ${result.tenantCount} active tenant${result.tenantCount === 1 ? '' : 's'}` });
   } catch (error) {
     console.error('Queue month-end reminders error:', error);

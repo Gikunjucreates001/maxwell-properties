@@ -4,18 +4,24 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "db:migrate:sqlite": "node src/migrate-sqlite-to-supabase.js",
+    "db:migrate:sqlite:apply": "node src/migrate-sqlite-to-supabase.js --apply",
+    "db:verify": "node src/verify-supabase.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.3.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "google-auth-library": "^11.0.2",
     "helmet": "^7.1.0",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "better-sqlite3": "11.3.0"
   }
 }
 

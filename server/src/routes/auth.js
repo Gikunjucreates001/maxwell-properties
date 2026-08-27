@@ -23,7 +23,7 @@ function createSession(user) {
   };
 }
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const portal = getPortal(req.body?.portal);
     if (!portal) {
@@ -37,7 +37,7 @@ router.post('/login', (req, res) => {
     }
 
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
 
     if (!user) {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
@@ -63,7 +63,7 @@ router.post('/login', (req, res) => {
   }
 });
 
-router.post('/refresh', (req, res) => {
+router.post('/refresh', async (req, res) => {
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) {
@@ -77,7 +77,7 @@ router.post('/refresh', (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid refresh token' });
     }
 
-    const user = getDb().prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(decoded.id);
+    const user = await getDb().prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(decoded.id);
     if (!user) {
       return res.status(401).json({ success: false, error: 'User account not found' });
     }
@@ -96,7 +96,7 @@ router.post('/refresh', (req, res) => {
   }
 });
 
-router.post('/change-password', authenticateToken, (req, res) => {
+router.post('/change-password', authenticateToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword || !newPassword) {
@@ -108,7 +108,7 @@ router.post('/change-password', authenticateToken, (req, res) => {
     }
 
     const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
@@ -120,7 +120,7 @@ router.post('/change-password', authenticateToken, (req, res) => {
     }
 
     const newHash = bcrypt.hashSync(newPassword, 12);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
 
     res.json({ success: true, data: { message: 'Password updated successfully' } });
   } catch (error) {
@@ -152,8 +152,8 @@ router.post('/google', async (req, res) => {
     }
 
     const db = getDb();
-    const googleUser = db.prepare('SELECT * FROM users WHERE google_id = ?').get(payload.sub);
-    const emailUser = db.prepare('SELECT * FROM users WHERE email = ?').get(payload.email.toLowerCase());
+    const googleUser = await db.prepare('SELECT * FROM users WHERE google_id = ?').get(payload.sub);
+    const emailUser = await db.prepare('SELECT * FROM users WHERE email = ?').get(payload.email.toLowerCase());
     if (googleUser && emailUser && googleUser.id !== emailUser.id) {
       return res.status(403).json({ success: false, error: 'This Google account is already linked to another user' });
     }
@@ -170,11 +170,11 @@ router.post('/google', async (req, res) => {
     } else if (user.google_id && user.google_id !== payload.sub) {
       return res.status(403).json({ success: false, error: 'This email is already linked to a different Google account' });
     } else if (user.google_id !== payload.sub || !String(user.auth_provider || '').includes('google')) {
-      db.prepare(`
+      await db.prepare(`
         UPDATE users SET google_id = ?, auth_provider = CASE WHEN auth_provider = 'password' THEN 'password+google' ELSE auth_provider END
         WHERE id = ?
       `).run(payload.sub, user.id);
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+      user = await db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
     }
 
     res.json({ success: true, data: createSession(user) });
@@ -184,10 +184,10 @@ router.post('/google', async (req, res) => {
   }
 });
 
-router.get('/me', authenticateToken, (req, res) => {
+router.get('/me', authenticateToken, async (req, res) => {
   try {
     const db = getDb();
-    const user = db.prepare('SELECT id, email, name, role, created_at FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT id, email, name, role, created_at FROM users WHERE id = ?').get(req.user.id);
     
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });

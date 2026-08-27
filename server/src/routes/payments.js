@@ -14,7 +14,7 @@ import {
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const db = getDb();
     const { property_id, tenant_id, status, from_date, to_date } = req.query;
@@ -52,7 +52,7 @@ router.get('/', (req, res) => {
 
     query += ` ORDER BY py.created_at DESC`;
 
-    const payments = db.prepare(query).all(...params);
+    const payments = await db.prepare(query).all(...params);
     res.json({ success: true, data: payments });
   } catch (error) {
     console.error('Get payments error:', error);
@@ -60,15 +60,15 @@ router.get('/', (req, res) => {
   }
 });
 
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   try {
     const db = getDb();
     
-    const total_collected = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'").get().total;
-    const total_pending = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'pending'").get().total;
-    const total_overdue = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'overdue'").get().total;
+    const total_collected = (await db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'").get()).total;
+    const total_pending = (await db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'pending'").get()).total;
+    const total_overdue = (await db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'overdue'").get()).total;
 
-    const by_property = db.prepare(`
+    const by_property = await db.prepare(`
       SELECT p.name as property_name, COALESCE(SUM(py.amount), 0) as total
       FROM properties p
       LEFT JOIN payments py ON p.id = py.property_id AND py.status = 'paid'
@@ -90,12 +90,12 @@ router.get('/summary', (req, res) => {
   }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
     
-    const payment = db.prepare(`
+    const payment = await db.prepare(`
       SELECT py.*, p.name as property_name, t.name as tenant_name, u.house_id
       FROM payments py
       LEFT JOIN properties p ON py.property_id = p.id
@@ -115,7 +115,7 @@ router.get('/:id', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const { property_id, tenant_id } = req.body || {};
@@ -139,20 +139,20 @@ router.post('/', (req, res) => {
     if (!isValidDate(payment_date) || !isValidDate(due_date)) {
       return res.status(400).json({ success: false, error: 'Payment dates must use a valid date' });
     }
-    const tenant = db.prepare('SELECT id, property_id FROM tenants WHERE id = ?').get(tenant_id);
-    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id) || !tenant) {
+    const tenant = await db.prepare('SELECT id, property_id FROM tenants WHERE id = ?').get(tenant_id);
+    if (!await db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id) || !tenant) {
       return res.status(400).json({ success: false, error: 'Choose an existing property and tenant' });
     }
     if (String(tenant.property_id) !== String(property_id)) {
       return res.status(400).json({ success: false, error: 'Selected tenant does not belong to this property' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO payments (property_id, tenant_id, amount, payment_type, status, method, payment_date, due_date, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(property_id, tenant_id, parsedAmount.value, payment_type, status, method, payment_date, due_date, notes);
 
-    const newPayment = db.prepare(`
+    const newPayment = await db.prepare(`
       SELECT py.*, p.name as property_name, t.name as tenant_name, u.house_id
       FROM payments py
       LEFT JOIN properties p ON py.property_id = p.id
@@ -162,8 +162,8 @@ router.post('/', (req, res) => {
     `).get(result.lastInsertRowid);
     
     if (status === 'paid') {
-      queuePaymentReceipts(newPayment.id, req.user.id);
-      queueOnboardingIfEligible(newPayment.tenant_id, req.user.id);
+      await queuePaymentReceipts(newPayment.id, req.user.id);
+      await queueOnboardingIfEligible(newPayment.tenant_id, req.user.id);
     }
     res.status(201).json({ success: true, data: newPayment });
   } catch (error) {
@@ -172,7 +172,7 @@ router.post('/', (req, res) => {
   }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
@@ -197,10 +197,10 @@ router.put('/:id', (req, res) => {
     if (!isValidDate(payment_date) || !isValidDate(due_date)) {
       return res.status(400).json({ success: false, error: 'Payment dates must use a valid date' });
     }
-    const currentPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id);
+    const currentPayment = await db.prepare('SELECT * FROM payments WHERE id = ?').get(id);
     if (!currentPayment) return res.status(404).json({ success: false, error: 'Payment not found' });
-    const tenant = db.prepare('SELECT id, property_id FROM tenants WHERE id = ?').get(tenant_id);
-    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id) || !tenant) {
+    const tenant = await db.prepare('SELECT id, property_id FROM tenants WHERE id = ?').get(tenant_id);
+    if (!await db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id) || !tenant) {
       return res.status(400).json({ success: false, error: 'Choose an existing property and tenant' });
     }
     if (String(tenant.property_id) !== String(property_id)) {
@@ -209,11 +209,11 @@ router.put('/:id', (req, res) => {
 
     if (req.user.role === 'manager') {
       const payload = { property_id: Number(property_id), tenant_id: Number(tenant_id), amount: parsedAmount.value, payment_type, status, method, payment_date, due_date, notes };
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'payment', entityId: id, action: 'update', payload, reason: `Correct payment record ${id}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'payment', entityId: id, action: 'update', payload, reason: `Correct payment record ${id}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Payment correction submitted for admin approval' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE payments 
       SET property_id = ?, tenant_id = ?, amount = ?, payment_type = ?, status = ?, method = ?, payment_date = ?, due_date = ?, notes = ?, receipt_notifications_sent_at = CASE WHEN ? = 'paid' THEN receipt_notifications_sent_at ELSE NULL END
       WHERE id = ?
@@ -223,7 +223,7 @@ router.put('/:id', (req, res) => {
       return res.status(404).json({ success: false, error: 'Payment not found' });
     }
 
-    const updatedPayment = db.prepare(`
+    const updatedPayment = await db.prepare(`
       SELECT py.*, p.name as property_name, t.name as tenant_name, u.house_id
       FROM payments py
       LEFT JOIN properties p ON py.property_id = p.id
@@ -233,8 +233,8 @@ router.put('/:id', (req, res) => {
     `).get(id);
     
     if (status === 'paid') {
-      queuePaymentReceipts(updatedPayment.id, req.user.id);
-      queueOnboardingIfEligible(updatedPayment.tenant_id, req.user.id);
+      await queuePaymentReceipts(updatedPayment.id, req.user.id);
+      await queueOnboardingIfEligible(updatedPayment.tenant_id, req.user.id);
     }
     res.json({ success: true, data: updatedPayment });
   } catch (error) {
@@ -243,18 +243,18 @@ router.put('/:id', (req, res) => {
   }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id);
+    const payment = await db.prepare('SELECT * FROM payments WHERE id = ?').get(id);
     if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'payment', entityId: id, action: 'delete', payload: {}, reason: `Delete payment record ${id}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'payment', entityId: id, action: 'delete', payload: {}, reason: `Delete payment record ${id}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Payment deletion submitted for admin approval' });
     }
     
-    const result = db.prepare('DELETE FROM payments WHERE id = ?').run(id);
+    const result = await db.prepare('DELETE FROM payments WHERE id = ?').run(id);
     if (result.changes === 0) {
       return res.status(404).json({ success: false, error: 'Payment not found' });
     }

@@ -13,10 +13,10 @@ import {
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const db = getDb();
-    const tenants = db.prepare(`
+    const tenants = await db.prepare(`
       SELECT t.*, p.name as property_name
         , u.house_id, u.rent_amount as unit_rent_amount, u.water_billing_type, u.water_rate, u.water_notes
       FROM tenants t
@@ -31,12 +31,12 @@ router.get('/', (req, res) => {
   }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
     
-    const tenant = db.prepare(`
+    const tenant = await db.prepare(`
       SELECT t.*, p.name as property_name
         , u.house_id, u.rent_amount as unit_rent_amount, u.water_billing_type, u.water_rate, u.water_notes
       FROM tenants t
@@ -49,7 +49,7 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ success: false, error: 'Tenant not found' });
     }
 
-    tenant.payments = db.prepare('SELECT * FROM payments WHERE tenant_id = ? ORDER BY created_at DESC').all(id);
+    tenant.payments = await db.prepare('SELECT * FROM payments WHERE tenant_id = ? ORDER BY created_at DESC').all(id);
 
     res.json({ success: true, data: tenant });
   } catch (error) {
@@ -58,7 +58,7 @@ router.get('/:id', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const { property_id } = req.body || {};
@@ -78,7 +78,7 @@ router.post('/', (req, res) => {
     if (!name || !property_id) {
       return res.status(400).json({ success: false, error: 'Name and property_id are required' });
     }
-    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
+    if (!await db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
       return res.status(400).json({ success: false, error: 'Selected property was not found' });
     }
     if (!TENANT_TYPES.includes(type) || !TENANT_STATUSES.includes(status)) {
@@ -98,28 +98,28 @@ router.post('/', (req, res) => {
     }
     if (depositAmount.error) return res.status(400).json({ success: false, error: depositAmount.error });
 
-    const property = db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
+    const property = await db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
     let rentAmount = amount.value;
     if (isApartmentProperty(property.type)) {
       if (!unit_id || !Number.isInteger(unit_id)) return res.status(400).json({ success: false, error: 'Choose an available House ID for this apartment' });
-      const unit = db.prepare("SELECT * FROM units WHERE id = ? AND property_id = ? AND status = 'ready'").get(unit_id, property_id);
+      const unit = await db.prepare("SELECT * FROM units WHERE id = ? AND property_id = ? AND status = 'ready'").get(unit_id, property_id);
       if (!unit) return res.status(400).json({ success: false, error: 'Choose an available House ID for this apartment' });
-      if (db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active'").get(unit_id)) return res.status(409).json({ success: false, error: 'That House ID is already occupied' });
+      if (await db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active'").get(unit_id)) return res.status(409).json({ success: false, error: 'That House ID is already occupied' });
       rentAmount = unit.rent_amount;
     }
 
     const payload = { property_id: Number(property_id), unit_id, name, email, phone, type, lease_start, lease_end, rent_amount: rentAmount, deposit_amount: depositAmount.value, physical_contract_received, contract_reference, status };
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'tenant', action: 'create', payload, reason: `Register tenant ${name}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'tenant', action: 'create', payload, reason: `Register tenant ${name}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Tenant registration submitted for admin approval' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO tenants (property_id, unit_id, name, email, phone, type, lease_start, lease_end, rent_amount, deposit_amount, physical_contract_received, contract_reference, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(property_id, unit_id, name, email, phone, type, lease_start, lease_end, rentAmount, depositAmount.value, physical_contract_received, contract_reference, status);
 
-    const newTenant = db.prepare(`
+    const newTenant = await db.prepare(`
       SELECT t.*, p.name as property_name
         , u.house_id, u.rent_amount as unit_rent_amount, u.water_billing_type, u.water_rate, u.water_notes
       FROM tenants t
@@ -130,7 +130,7 @@ router.post('/', (req, res) => {
     
     res.status(201).json({ success: true, data: newTenant });
   } catch (error) {
-    if (String(error.message).includes('idx_one_active_tenant_per_unit') || String(error.message).includes('UNIQUE constraint failed: tenants.unit_id')) {
+    if (error.code === '23505' || String(error.message).includes('idx_one_active_tenant_per_unit') || String(error.message).includes('UNIQUE constraint failed: tenants.unit_id')) {
       return res.status(409).json({ success: false, error: 'That House ID is already assigned to an active tenant' });
     }
     console.error('Create tenant error:', error);
@@ -138,11 +138,11 @@ router.post('/', (req, res) => {
   }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const currentTenant = db.prepare('SELECT * FROM tenants WHERE id = ?').get(id);
+    const currentTenant = await db.prepare('SELECT * FROM tenants WHERE id = ?').get(id);
     if (!currentTenant) return res.status(404).json({ success: false, error: 'Tenant not found' });
     const { property_id } = req.body || {};
     let unit_id = req.body?.unit_id === undefined ? currentTenant.unit_id : (req.body.unit_id ? Number(req.body.unit_id) : null);
@@ -161,7 +161,7 @@ router.put('/:id', (req, res) => {
     if (!name || !property_id) {
       return res.status(400).json({ success: false, error: 'Name and property_id are required' });
     }
-    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
+    if (!await db.prepare('SELECT id FROM properties WHERE id = ?').get(property_id)) {
       return res.status(400).json({ success: false, error: 'Selected property was not found' });
     }
     if (!TENANT_TYPES.includes(type) || !TENANT_STATUSES.includes(status)) {
@@ -181,13 +181,13 @@ router.put('/:id', (req, res) => {
     }
     if (depositAmount.error) return res.status(400).json({ success: false, error: depositAmount.error });
 
-    const property = db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
+    const property = await db.prepare('SELECT id, type FROM properties WHERE id = ?').get(property_id);
     let rentAmount = amount.value;
     if (isApartmentProperty(property.type)) {
       if (!unit_id || !Number.isInteger(unit_id)) return res.status(400).json({ success: false, error: 'Choose an available House ID for this apartment' });
-      const unit = db.prepare("SELECT * FROM units WHERE id = ? AND property_id = ? AND status = 'ready'").get(unit_id, property_id);
+      const unit = await db.prepare("SELECT * FROM units WHERE id = ? AND property_id = ? AND status = 'ready'").get(unit_id, property_id);
       if (!unit) return res.status(400).json({ success: false, error: 'Choose an available House ID for this apartment' });
-      if (db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active' AND id != ?").get(unit_id, id)) return res.status(409).json({ success: false, error: 'That House ID is already occupied' });
+      if (await db.prepare("SELECT id FROM tenants WHERE unit_id = ? AND status = 'active' AND id != ?").get(unit_id, id)) return res.status(409).json({ success: false, error: 'That House ID is already occupied' });
       rentAmount = unit.rent_amount;
     } else {
       unit_id = null;
@@ -195,11 +195,11 @@ router.put('/:id', (req, res) => {
 
     const payload = { property_id: Number(property_id), unit_id, name, email, phone, type, lease_start, lease_end, rent_amount: rentAmount, deposit_amount: depositAmount.value, physical_contract_received, contract_reference, status };
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'tenant', entityId: id, action: 'update', payload, reason: `Update tenant ${name}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'tenant', entityId: id, action: 'update', payload, reason: `Update tenant ${name}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Tenant update submitted for admin approval' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE tenants 
       SET property_id = ?, unit_id = ?, name = ?, email = ?, phone = ?, type = ?, lease_start = ?, lease_end = ?, rent_amount = ?, deposit_amount = ?, physical_contract_received = ?, contract_reference = ?, status = ?
       WHERE id = ?
@@ -209,7 +209,7 @@ router.put('/:id', (req, res) => {
       return res.status(404).json({ success: false, error: 'Tenant not found' });
     }
 
-    const updatedTenant = db.prepare(`
+    const updatedTenant = await db.prepare(`
       SELECT t.*, p.name as property_name, u.house_id, u.rent_amount as unit_rent_amount, u.water_billing_type, u.water_rate, u.water_notes
       FROM tenants t
       LEFT JOIN properties p ON t.property_id = p.id
@@ -219,7 +219,7 @@ router.put('/:id', (req, res) => {
     
     res.json({ success: true, data: updatedTenant });
   } catch (error) {
-    if (String(error.message).includes('idx_one_active_tenant_per_unit') || String(error.message).includes('UNIQUE constraint failed: tenants.unit_id')) {
+    if (error.code === '23505' || String(error.message).includes('idx_one_active_tenant_per_unit') || String(error.message).includes('UNIQUE constraint failed: tenants.unit_id')) {
       return res.status(409).json({ success: false, error: 'That House ID is already assigned to an active tenant' });
     }
     console.error('Update tenant error:', error);
@@ -227,23 +227,23 @@ router.put('/:id', (req, res) => {
   }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const tenant = db.prepare('SELECT * FROM tenants WHERE id = ?').get(id);
+    const tenant = await db.prepare('SELECT * FROM tenants WHERE id = ?').get(id);
     if (!tenant) return res.status(404).json({ success: false, error: 'Tenant not found' });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'tenant', entityId: id, action: 'delete', payload: {}, reason: `Delete tenant ${tenant.name}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'tenant', entityId: id, action: 'delete', payload: {}, reason: `Delete tenant ${tenant.name}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Tenant deletion submitted for admin approval' });
     }
     
-    const paymentCount = db.prepare('SELECT COUNT(*) as count FROM payments WHERE tenant_id = ?').get(id).count;
+    const paymentCount = (await db.prepare('SELECT COUNT(*) as count FROM payments WHERE tenant_id = ?').get(id)).count;
     if (paymentCount > 0) {
       return res.status(400).json({ success: false, error: 'Cannot delete tenant with payment history' });
     }
 
-    const result = db.prepare('DELETE FROM tenants WHERE id = ?').run(id);
+    const result = await db.prepare('DELETE FROM tenants WHERE id = ?').run(id);
     if (result.changes === 0) {
       return res.status(404).json({ success: false, error: 'Tenant not found' });
     }

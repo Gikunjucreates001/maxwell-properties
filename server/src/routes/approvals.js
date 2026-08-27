@@ -9,7 +9,7 @@ function canAccessApproval(req, approval) {
   return req.user.role === 'admin' || approval.requested_by === req.user.id;
 }
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const db = getDb();
     const status = typeof req.query.status === 'string' ? req.query.status : '';
@@ -32,7 +32,7 @@ router.get('/', (req, res) => {
       params.push(status);
     }
     query += ' ORDER BY CASE WHEN ar.status = \'pending\' THEN 0 ELSE 1 END, ar.created_at DESC';
-    const approvals = db.prepare(query).all(...params).map((approval) => ({
+    const approvals = (await db.prepare(query).all(...params)).map((approval) => ({
       ...approval,
       payload: JSON.parse(approval.payload_json),
     }));
@@ -43,10 +43,10 @@ router.get('/', (req, res) => {
   }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const approval = db.prepare(`
+    const approval = await db.prepare(`
       SELECT ar.*, requester.name as requester_name, requester.email as requester_email, reviewer.name as reviewer_name
       FROM approval_requests ar
       JOIN users requester ON requester.id = ar.requested_by
@@ -55,7 +55,7 @@ router.get('/:id', (req, res) => {
     `).get(req.params.id);
     if (!approval) return res.status(404).json({ success: false, error: 'Approval request not found' });
     if (!canAccessApproval(req, approval)) return res.status(403).json({ success: false, error: 'You do not have permission to view this approval' });
-    const comments = db.prepare(`
+    const comments = await db.prepare(`
       SELECT ac.*, u.name as author_name, u.role as author_role
       FROM approval_comments ac JOIN users u ON u.id = ac.author_id
       WHERE ac.approval_id = ? ORDER BY ac.created_at ASC
@@ -67,16 +67,16 @@ router.get('/:id', (req, res) => {
   }
 });
 
-router.post('/:id/comments', (req, res) => {
+router.post('/:id/comments', async (req, res) => {
   try {
     const db = getDb();
-    const approval = db.prepare('SELECT * FROM approval_requests WHERE id = ?').get(req.params.id);
+    const approval = await db.prepare('SELECT * FROM approval_requests WHERE id = ?').get(req.params.id);
     const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
     if (!approval) return res.status(404).json({ success: false, error: 'Approval request not found' });
     if (!canAccessApproval(req, approval)) return res.status(403).json({ success: false, error: 'You do not have permission to discuss this approval' });
     if (!comment) return res.status(400).json({ success: false, error: 'Comment is required' });
-    const result = db.prepare('INSERT INTO approval_comments (approval_id, author_id, comment) VALUES (?, ?, ?)').run(req.params.id, req.user.id, comment);
-    const saved = db.prepare(`
+    const result = await db.prepare('INSERT INTO approval_comments (approval_id, author_id, comment) VALUES (?, ?, ?)').run(req.params.id, req.user.id, comment);
+    const saved = await db.prepare(`
       SELECT ac.*, u.name as author_name, u.role as author_role
       FROM approval_comments ac JOIN users u ON u.id = ac.author_id WHERE ac.id = ?
     `).get(result.lastInsertRowid);
@@ -87,7 +87,7 @@ router.post('/:id/comments', (req, res) => {
   }
 });
 
-router.post('/:id/decision', (req, res) => {
+router.post('/:id/decision', async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ success: false, error: 'Only an admin can review approval requests' });
     const decision = req.body?.status;
@@ -97,16 +97,16 @@ router.post('/:id/decision', (req, res) => {
     const db = getDb();
     let reviewedApproval = null;
     try {
-      db.transaction(() => {
-        const approval = db.prepare('SELECT * FROM approval_requests WHERE id = ? AND status = \'pending\'').get(req.params.id);
+      await db.transaction(async (tx) => {
+        const approval = await tx.prepare('SELECT * FROM approval_requests WHERE id = ? AND status = \'pending\'').get(req.params.id);
         if (!approval) {
           const error = new Error('Pending approval request not found');
           error.code = 'NOT_FOUND';
           throw error;
         }
         reviewedApproval = approval;
-        if (decision === 'approved') executeApprovalInTransaction(db, approval, req.user.id);
-        const result = db.prepare(`
+        if (decision === 'approved') await executeApprovalInTransaction(tx, approval, req.user.id);
+        const result = await tx.prepare(`
           UPDATE approval_requests
           SET status = ?, reviewed_by = ?, review_note = ?, reviewed_at = CURRENT_TIMESTAMP, executed_at = CASE WHEN ? = 'approved' THEN CURRENT_TIMESTAMP ELSE executed_at END
           WHERE id = ? AND status = 'pending'
@@ -124,9 +124,9 @@ router.post('/:id/decision', (req, res) => {
     }
     if (decision === 'approved' && reviewedApproval?.entity_type === 'payment' && reviewedApproval.action !== 'delete') {
       try {
-        queuePaymentReceipts(reviewedApproval.entity_id, req.user.id);
-        const payment = db.prepare('SELECT tenant_id FROM payments WHERE id = ?').get(reviewedApproval.entity_id);
-        if (payment) queueOnboardingIfEligible(payment.tenant_id, req.user.id);
+        await queuePaymentReceipts(reviewedApproval.entity_id, req.user.id);
+        const payment = await db.prepare('SELECT tenant_id FROM payments WHERE id = ?').get(reviewedApproval.entity_id);
+        if (payment) await queueOnboardingIfEligible(payment.tenant_id, req.user.id);
       } catch (error) {
         console.error('Queue approved payment notifications error:', error);
       }

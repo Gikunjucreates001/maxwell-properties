@@ -11,9 +11,9 @@ const selectManager = `
   WHERE role = 'manager'
 `;
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const managers = getDb().prepare(`${selectManager} ORDER BY name COLLATE NOCASE ASC`).all();
+    const managers = await getDb().prepare(`${selectManager} ORDER BY name COLLATE NOCASE ASC`).all();
     res.json({ success: true, data: managers });
   } catch (error) {
     console.error('Get managers error:', error);
@@ -21,7 +21,7 @@ router.get('/', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const name = cleanText(req.body?.name, '');
     const email = cleanEmail(req.body?.email);
@@ -37,15 +37,15 @@ router.post('/', (req, res) => {
 
     const db = getDb();
     const passwordHash = bcrypt.hashSync(password, 12);
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO users (email, password_hash, name, role, auth_provider, is_active)
       VALUES (?, ?, ?, 'manager', 'password', 1)
     `).run(email, passwordHash, name);
 
-    const manager = db.prepare(`${selectManager} AND id = ?`).get(result.lastInsertRowid);
+    const manager = await db.prepare(`${selectManager} AND id = ?`).get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: manager });
   } catch (error) {
-    if (String(error.message).includes('UNIQUE constraint failed: users.email')) {
+    if (error.code === '23505' || String(error.message).includes('UNIQUE constraint failed: users.email')) {
       return res.status(409).json({ success: false, error: 'A user with this email already exists' });
     }
     console.error('Create manager error:', error);
@@ -53,10 +53,10 @@ router.post('/', (req, res) => {
   }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const manager = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'manager'").get(req.params.id);
+    const manager = await db.prepare("SELECT * FROM users WHERE id = ? AND role = 'manager'").get(req.params.id);
     if (!manager) return res.status(404).json({ success: false, error: 'Manager not found' });
 
     const name = cleanText(req.body?.name, manager.name);
@@ -73,15 +73,15 @@ router.put('/:id', (req, res) => {
     }
 
     const isActive = req.body?.is_active === undefined ? manager.is_active : req.body.is_active ? 1 : 0;
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET name = ?, email = ?, password_hash = ?, is_active = ?
       WHERE id = ? AND role = 'manager'
     `).run(name, email, passwordHash, isActive, manager.id);
 
-    const updatedManager = db.prepare(`${selectManager} AND id = ?`).get(manager.id);
+    const updatedManager = await db.prepare(`${selectManager} AND id = ?`).get(manager.id);
     res.json({ success: true, data: updatedManager });
   } catch (error) {
-    if (String(error.message).includes('UNIQUE constraint failed: users.email')) {
+    if (error.code === '23505' || String(error.message).includes('UNIQUE constraint failed: users.email')) {
       return res.status(409).json({ success: false, error: 'A user with this email already exists' });
     }
     console.error('Update manager error:', error);
@@ -89,9 +89,9 @@ router.put('/:id', (req, res) => {
   }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const result = getDb().prepare("UPDATE users SET is_active = 0 WHERE id = ? AND role = 'manager'").run(req.params.id);
+    const result = await getDb().prepare("UPDATE users SET is_active = 0 WHERE id = ? AND role = 'manager'").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ success: false, error: 'Manager not found' });
     res.json({ success: true, data: { message: 'Manager deactivated successfully' } });
   } catch (error) {

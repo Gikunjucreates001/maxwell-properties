@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { getDb } from './database.js';
+import { initDb } from './database.js';
 import { authenticateToken, requireRole } from './middleware/auth.js';
 
 import authRoutes from './routes/auth.js';
@@ -31,8 +31,8 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-// Initialize Database
-getDb();
+// Initialize the Supabase Postgres connection before accepting requests.
+await initDb();
 
 const app = express();
 app.disable('x-powered-by');

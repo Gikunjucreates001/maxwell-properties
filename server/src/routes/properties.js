@@ -10,10 +10,10 @@ import {
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const db = getDb();
-    const properties = db.prepare(`
+    const properties = await db.prepare(`
       SELECT 
         p.*,
         (SELECT COUNT(*) FROM tenants t WHERE t.property_id = p.id AND t.status = 'active') as tenant_count,
@@ -33,29 +33,29 @@ router.get('/', (req, res) => {
   }
 });
 
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const db = getDb();
     
-    const total_properties = db.prepare("SELECT COUNT(*) as count FROM properties").get().count;
-    const monthly_expected_income = db.prepare(`
+    const total_properties = (await db.prepare("SELECT COUNT(*) as count FROM properties").get()).count;
+    const monthly_expected_income = (await db.prepare(`
       SELECT COALESCE(SUM(CASE WHEN t.unit_id IS NOT NULL THEN COALESCE(u.rent_amount, t.rent_amount) ELSE t.rent_amount END), 0) as total
       FROM tenants t
       JOIN properties p ON p.id = t.property_id AND p.status = 'active'
       LEFT JOIN units u ON u.id = t.unit_id
       WHERE t.status = 'active'
-    `).get().total;
+    `).get()).total;
     const total_monthly_income = monthly_expected_income;
-    const total_tenants = db.prepare("SELECT COUNT(*) as count FROM tenants WHERE status = 'active'").get().count;
-    const open_issues = db.prepare("SELECT COUNT(*) as count FROM issues WHERE status != 'closed' AND status != 'resolved'").get().count;
-    const total_expenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses').get().total;
-    const total_collected = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'").get().total;
+    const total_tenants = (await db.prepare("SELECT COUNT(*) as count FROM tenants WHERE status = 'active'").get()).count;
+    const open_issues = (await db.prepare("SELECT COUNT(*) as count FROM issues WHERE status != 'closed' AND status != 'resolved'").get()).count;
+    const total_expenses = (await db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses').get()).total;
+    const total_collected = (await db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'").get()).total;
     const net_income = total_collected - total_expenses;
     const pending_approvals = req.user.role === 'admin'
-      ? db.prepare("SELECT COUNT(*) as count FROM approval_requests WHERE status = 'pending'").get().count
-      : db.prepare("SELECT COUNT(*) as count FROM approval_requests WHERE requested_by = ? AND status = 'pending'").get(req.user.id).count;
+      ? (await db.prepare("SELECT COUNT(*) as count FROM approval_requests WHERE status = 'pending'").get()).count
+      : (await db.prepare("SELECT COUNT(*) as count FROM approval_requests WHERE requested_by = ? AND status = 'pending'").get(req.user.id)).count;
     
-    const recent_payments = db.prepare(`
+    const recent_payments = await db.prepare(`
       SELECT py.*, p.name as property_name, t.name as tenant_name 
       FROM payments py
       LEFT JOIN properties p ON py.property_id = p.id
@@ -75,7 +75,7 @@ router.get('/stats', (req, res) => {
       });
     }
 
-    const revenueRows = db.prepare(`
+    const revenueRows = await db.prepare(`
       SELECT strftime('%Y-%m', payment_date) as month, COALESCE(SUM(amount), 0) as total
       FROM payments
       WHERE status = 'paid' AND payment_date IS NOT NULL
@@ -89,7 +89,7 @@ router.get('/stats', (req, res) => {
       return { month: monthLabel, total: revenueByMonth.get(monthStr) || 0 };
     });
 
-    const expenseRows = db.prepare(`
+    const expenseRows = await db.prepare(`
       SELECT strftime('%Y-%m', expense_date) as month, COALESCE(SUM(amount), 0) as total
       FROM expenses GROUP BY strftime('%Y-%m', expense_date)
     `).all();
@@ -99,7 +99,7 @@ router.get('/stats', (req, res) => {
       const monthKey = `${month.year}-${month.month.toString().padStart(2, '0')}`;
       return { month: row.month, total: row.total - (expensesByMonth.get(monthKey) || 0) };
     });
-    const recent_expenses = db.prepare(`
+    const recent_expenses = await db.prepare(`
       SELECT e.*, p.name as property_name FROM expenses e JOIN properties p ON p.id = e.property_id
       ORDER BY e.created_at DESC LIMIT 5
     `).all();
@@ -128,41 +128,41 @@ router.get('/stats', (req, res) => {
   }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
     
-    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const property = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     if (!property) {
       return res.status(404).json({ success: false, error: 'Property not found' });
     }
 
-    property.tenants = db.prepare(`
+    property.tenants = await db.prepare(`
       SELECT t.*, u.house_id, u.rent_amount as unit_rent_amount, u.water_billing_type, u.water_rate, u.water_notes
       FROM tenants t LEFT JOIN units u ON u.id = t.unit_id
       WHERE t.property_id = ?
     `).all(id);
-    property.recent_payments = db.prepare(`
+    property.recent_payments = await db.prepare(`
       SELECT py.*, t.name as tenant_name
       FROM payments py
       LEFT JOIN tenants t ON py.tenant_id = t.id
       WHERE py.property_id = ?
       ORDER BY py.created_at DESC LIMIT 5
     `).all(id);
-    property.open_issues = db.prepare(`
+    property.open_issues = await db.prepare(`
       SELECT i.*, u.house_id
       FROM issues i LEFT JOIN units u ON u.id = i.unit_id
       WHERE i.property_id = ? AND i.status != 'closed' AND i.status != 'resolved'
     `).all(id);
-    property.units = db.prepare(`
+    property.units = await db.prepare(`
       SELECT u.*, t.id as tenant_id, t.name as tenant_name
       FROM units u LEFT JOIN tenants t ON t.unit_id = u.id AND t.status = 'active'
       WHERE u.property_id = ? ORDER BY u.house_id COLLATE NOCASE ASC
     `).all(id);
-    property.expenses = db.prepare('SELECT * FROM expenses WHERE property_id = ? ORDER BY expense_date DESC, created_at DESC LIMIT 10').all(id);
-    property.total_collected = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE property_id = ? AND status = 'paid'").get(id).total;
-    property.total_expenses = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE property_id = ?').get(id).total;
+    property.expenses = await db.prepare('SELECT * FROM expenses WHERE property_id = ? ORDER BY expense_date DESC, created_at DESC LIMIT 10').all(id);
+    property.total_collected = (await db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE property_id = ? AND status = 'paid'").get(id)).total;
+    property.total_expenses = (await db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE property_id = ?').get(id)).total;
     property.net_income = property.total_collected - property.total_expenses;
 
     res.json({ success: true, data: property });
@@ -172,7 +172,7 @@ router.get('/:id', (req, res) => {
   }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const name = cleanText(req.body?.name, '');
@@ -203,12 +203,12 @@ router.post('/', (req, res) => {
       return res.status(400).json({ success: false, error: amount.error });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO properties (name, type, location, address, description, monthly_rent, status, rules, manager_name, manager_phone, manager_email, caretaker_name, caretaker_phone, caretaker_email)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(name, type, location, address, description, amount.value, status, rules, manager_name, manager_phone, manager_email, caretaker_name, caretaker_phone, caretaker_email);
 
-    const newProperty = db.prepare('SELECT * FROM properties WHERE id = ?').get(result.lastInsertRowid);
+    const newProperty = await db.prepare('SELECT * FROM properties WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: newProperty });
   } catch (error) {
     console.error('Create property error:', error);
@@ -216,7 +216,7 @@ router.post('/', (req, res) => {
   }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
@@ -248,18 +248,18 @@ router.put('/:id', (req, res) => {
       return res.status(400).json({ success: false, error: amount.error });
     }
 
-    const currentProperty = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const currentProperty = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     if (!currentProperty) return res.status(404).json({ success: false, error: 'Property not found' });
-    if (currentProperty.type !== type && db.prepare('SELECT id FROM units WHERE property_id = ? LIMIT 1').get(id)) {
+    if (currentProperty.type !== type && await db.prepare('SELECT id FROM units WHERE property_id = ? LIMIT 1').get(id)) {
       return res.status(400).json({ success: false, error: 'Property type cannot change while it has house units' });
     }
     const payload = { name, type, location, address, description, monthly_rent: amount.value, status, rules, manager_name, manager_phone, manager_email, caretaker_name, caretaker_phone, caretaker_email };
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'property', entityId: id, action: 'update', payload, reason: `Update property ${name}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'property', entityId: id, action: 'update', payload, reason: `Update property ${name}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Property update submitted for admin approval' });
     }
 
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE properties 
       SET name = ?, type = ?, location = ?, address = ?, description = ?, monthly_rent = ?, status = ?, rules = ?, manager_name = ?, manager_phone = ?, manager_email = ?, caretaker_name = ?, caretaker_phone = ?, caretaker_email = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -269,7 +269,7 @@ router.put('/:id', (req, res) => {
       return res.status(404).json({ success: false, error: 'Property not found' });
     }
 
-    const updatedProperty = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const updatedProperty = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     res.json({ success: true, data: updatedProperty });
   } catch (error) {
     console.error('Update property error:', error);
@@ -277,31 +277,31 @@ router.put('/:id', (req, res) => {
   }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const db = getDb();
     const { id } = req.params;
-    const property = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
+    const property = await db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
     if (!property) return res.status(404).json({ success: false, error: 'Property not found' });
     if (req.user.role === 'manager') {
-      const approval = createApproval({ requestedBy: req.user.id, entityType: 'property', entityId: id, action: 'delete', payload: {}, reason: `Delete property ${property.name}` });
+      const approval = await createApproval({ requestedBy: req.user.id, entityType: 'property', entityId: id, action: 'delete', payload: {}, reason: `Delete property ${property.name}` });
       return res.status(202).json({ success: true, pending: true, data: approval, message: 'Property deletion submitted for admin approval' });
     }
     
-    const tenantCount = db.prepare('SELECT COUNT(*) as count FROM tenants WHERE property_id = ?').get(id).count;
+    const tenantCount = (await db.prepare('SELECT COUNT(*) as count FROM tenants WHERE property_id = ?').get(id)).count;
     if (tenantCount > 0) {
       return res.status(400).json({ success: false, error: 'Cannot delete property with existing tenants' });
     }
 
-    const paymentCount = db.prepare('SELECT COUNT(*) as count FROM payments WHERE property_id = ?').get(id).count;
-    const issueCount = db.prepare('SELECT COUNT(*) as count FROM issues WHERE property_id = ?').get(id).count;
-    const unitCount = db.prepare('SELECT COUNT(*) as count FROM units WHERE property_id = ?').get(id).count;
-    const expenseCount = db.prepare('SELECT COUNT(*) as count FROM expenses WHERE property_id = ?').get(id).count;
+    const paymentCount = (await db.prepare('SELECT COUNT(*) as count FROM payments WHERE property_id = ?').get(id)).count;
+    const issueCount = (await db.prepare('SELECT COUNT(*) as count FROM issues WHERE property_id = ?').get(id)).count;
+    const unitCount = (await db.prepare('SELECT COUNT(*) as count FROM units WHERE property_id = ?').get(id)).count;
+    const expenseCount = (await db.prepare('SELECT COUNT(*) as count FROM expenses WHERE property_id = ?').get(id)).count;
     if (paymentCount > 0 || issueCount > 0 || unitCount > 0 || expenseCount > 0) {
       return res.status(400).json({ success: false, error: 'Cannot delete property with payment or issue history' });
     }
 
-    const result = db.prepare('DELETE FROM properties WHERE id = ?').run(id);
+    const result = await db.prepare('DELETE FROM properties WHERE id = ?').run(id);
     if (result.changes === 0) {
       return res.status(404).json({ success: false, error: 'Property not found' });
     }
