@@ -83,6 +83,15 @@ New or changed passwords must be 6–20 characters and include a lowercase lette
 
 In production, configure four different signing secrets: `ADMIN_JWT_SECRET`, `MANAGER_JWT_SECRET`, `ADMIN_JWT_REFRESH_SECRET`, and `MANAGER_JWT_REFRESH_SECRET`. The API refuses to start when they are missing. Use long, random values, keep them server-side, and rotate them during a planned session reset. `JWT_SECRET` and `JWT_REFRESH_SECRET` remain local-development fallbacks only.
 
+### Vercel project settings
+
+This repository contains two Vercel projects connected to the same GitHub repository:
+
+- `maxwell-properties`: keep the project root at the repository root, use `npm install` and `npm run build`, and leave the output directory as `public`. The build copies the Vite output into `public` automatically.
+- `server`: set the project root to `server`, use `npm install` and `npm start`, and deploy it as the Express API.
+
+The deployed frontend already points to the current API alias through `client/.env.production`. If the API alias or a custom domain changes, set `VITE_API_URL` in the frontend Vercel project to the API URL ending in `/api`. In the server Vercel project, set `CLIENT_URLS` to the deployed frontend URL(s) and add the required production secrets below.
+
 ### Supabase database setup and SQLite transfer
 
 The application now uses Supabase Postgres through a server-only connection. Add the Supabase Postgres connection string to `SUPABASE_DB_URL` (the pooled connection string is recommended for a hosted API), keep `SUPABASE_DB_SSL=true` and `SUPABASE_DB_SSL_REJECT_UNAUTHORIZED=true`, and never add this value to any `VITE_*` client variable. Only disable certificate verification for a deliberate local troubleshooting session.
