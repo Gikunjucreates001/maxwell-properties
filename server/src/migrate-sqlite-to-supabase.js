@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { closeDb, getDb, initDb } from './database.js';
+import { getPrimaryAdminEmail } from './services/passwordResets.js';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultSqlitePath = path.resolve(scriptDirectory, '..', 'data', 'maxwell.db');
@@ -116,13 +117,18 @@ async function migrate() {
     const legacyRows = new Map(TABLES.map(({ name, columns }) => [name, readLegacyRows(sqlite, name, columns)]));
     const db = await initDb({ bootstrap: false });
     try {
+      // Once the owner account has been normalized, do not let a repeat of the
+      // legacy transfer restore the old administrator email over it.
+      const normalizedPrimaryAdmin = await db.prepare("SELECT id FROM users WHERE email = ? AND role = 'admin'").get(getPrimaryAdminEmail());
       try {
         await db.transaction(async (tx) => {
           for (const { name, columns } of TABLES) {
             // The issue-to-expense foreign key is restored after both tables exist.
-            const rows = name === 'issues'
-              ? legacyRows.get(name).map((row) => ({ ...row, expense_id: null }))
-              : legacyRows.get(name);
+            let rows = legacyRows.get(name);
+            if (name === 'users' && normalizedPrimaryAdmin) {
+              rows = rows.filter((row) => row.role !== 'admin' || String(row.email).trim().toLowerCase() === getPrimaryAdminEmail());
+            }
+            if (name === 'issues') rows = rows.map((row) => ({ ...row, expense_id: null }));
             await insertRows(tx, `public.${name}`, columns, rows);
           }
 
