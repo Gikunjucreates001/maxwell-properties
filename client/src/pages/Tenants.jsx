@@ -5,8 +5,9 @@ import StatusBadge from '../components/StatusBadge';
 import client from '../api/client';
 import { Plus, Edit, Trash2, Loader2, Search, Home, FileCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getPropertyTypeLabel, isApartmentProperty } from '../utils/propertyTypes';
 
-const isApartment = (property) => property && ['apartment', 'rental'].includes(property.type);
+const isApartment = isApartmentProperty;
 const blankForm = (propertyId = '') => ({ property_id: String(propertyId || ''), unit_id: '', name: '', email: '', phone: '', type: 'long-term', lease_start: '', lease_end: '', rent_amount: '', deposit_amount: '', physical_contract_received: false, contract_reference: '', status: 'active' });
 
 const Tenants = () => {
@@ -91,7 +92,7 @@ const Tenants = () => {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingTenant ? 'Edit Tenant' : 'Add Tenant'}>
         <form onSubmit={submit} className="space-y-4">
-          <div><label className="mb-1 block text-sm font-medium text-gray-700">Property</label><select name="property_id" required value={formData.property_id} onChange={change} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-primary"><option value="" disabled>Select a property</option>{properties.map((property) => <option key={property.id} value={property.id}>{property.name} · {isApartment(property) ? 'Apartment' : 'Airbnb'}</option>)}</select></div>
+          <div><label className="mb-1 block text-sm font-medium text-gray-700">Property</label><select name="property_id" required value={formData.property_id} onChange={change} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-primary"><option value="" disabled>Select a property</option>{properties.map((property) => <option key={property.id} value={property.id}>{property.name} · {getPropertyTypeLabel(property.type)}</option>)}</select></div>
           {isApartment(selectedProperty) && <div><label className="mb-1 block text-sm font-medium text-gray-700">House ID</label><select name="unit_id" required value={formData.unit_id} onChange={change} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-primary"><option value="" disabled>Select an available House ID</option>{availableUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.house_id} · KES {Number(unit.rent_amount).toLocaleString()}</option>)}</select>{availableUnits.length === 0 && <p className="mt-1 text-xs text-amber-700">There are no ready vacant House IDs for this property.</p>}</div>}
           <div><label className="mb-1 block text-sm font-medium text-gray-700">Full name</label><input name="name" required value={formData.name} onChange={change} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-primary" /></div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div><label className="mb-1 block text-sm font-medium text-gray-700">Email</label><input name="email" type="email" value={formData.email} onChange={change} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-primary" /></div><div><label className="mb-1 block text-sm font-medium text-gray-700">Phone</label><input name="phone" value={formData.phone} onChange={change} className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-primary" /></div></div>
