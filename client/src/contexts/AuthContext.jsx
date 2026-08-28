@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import client from '../api/client';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext();
 
@@ -31,6 +32,29 @@ export const AuthProvider = ({ children }) => {
     };
     initAuth();
   }, []);
+
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let mounted = true;
+    const redirectRecoverySession = (session) => {
+      if (mounted && session && window.location.pathname !== '/reset-password') {
+        navigate('/reset-password', { replace: true });
+      }
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      redirectRecoverySession(data.session || null);
+    }).catch(() => undefined);
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      redirectRecoverySession(session || null);
+    });
+
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, [navigate]);
 
   const navigateToPortal = (role) => navigate(role === 'admin' ? '/admin' : '/manager');
 
@@ -68,12 +92,31 @@ export const AuthProvider = ({ children }) => {
   };
 
   const requestPasswordReset = async (email, portal = 'admin') => {
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const cooldownKey = `maxwell:password-reset:${portal}:${normalizedEmail}`;
+    const cooldownEndsAt = Number(localStorage.getItem(cooldownKey) || 0);
+    if (portal === 'admin' && cooldownEndsAt > Date.now()) {
+      const minutes = Math.max(1, Math.ceil((cooldownEndsAt - Date.now()) / 60000));
+      const message = `A reset request was already sent. Please wait about ${minutes} minute${minutes === 1 ? '' : 's'} before trying again.`;
+      toast.error(message);
+      return { success: false, status: 429, message };
+    }
+
     try {
-      const res = await client.post('/auth/password-reset/request', { email, portal });
+      const res = await client.post('/auth/password-reset/request', { email: normalizedEmail, portal });
+      if (portal === 'admin') {
+        // Supabase's built-in sender has a strict quota. One local guard keeps
+        // accidental double-clicks and page refreshes from consuming it again.
+        localStorage.setItem(cooldownKey, String(Date.now() + 60 * 60 * 1000));
+      }
       return { success: true, message: res.data?.data?.message };
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Unable to request a password reset');
-      return { success: false, status: error.response?.status };
+      const message = error.response?.data?.error || error.message || 'Unable to request a password reset';
+      if (portal === 'admin' && (error.response?.status === 429 || /rate limit|too many/i.test(message))) {
+        localStorage.setItem(cooldownKey, String(Date.now() + 60 * 60 * 1000));
+      }
+      toast.error(message);
+      return { success: false, status: error.response?.status, message };
     }
   };
 

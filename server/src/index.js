@@ -79,6 +79,7 @@ app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth/google', loginLimiter);
 app.use('/api/auth/password-reset/request', passwordResetLimiter);
 app.use('/api/auth/password-reset/complete', passwordResetLimiter);
+app.use('/api/auth/password-reset/sync-supabase', passwordResetLimiter);
 app.use('/api/auth', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();

@@ -1,11 +1,16 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { getDb } from '../database.js';
-import { queueEmail } from './notifications.js';
 import { cleanEmail, validatePassword } from '../utils/validation.js';
+import { requestSupabasePasswordReset } from './supabaseAuth.js';
 
 const RESET_TTL_MINUTES = Math.min(Math.max(Number(process.env.PASSWORD_RESET_TTL_MINUTES || 30), 10), 120);
+const SUPABASE_EMAIL_COOLDOWN_MINUTES = Math.min(Math.max(Number(process.env.SUPABASE_AUTH_EMAIL_COOLDOWN_MINUTES || 60), 10), 120);
 const DEFAULT_PRIMARY_ADMIN_EMAIL = 'pnganga0133@gmail.com';
+
+function isSupabaseRateLimited(error) {
+  return error?.status === 429 || /rate limit|too many/i.test(error?.message || '');
+}
 
 export function getPrimaryAdminEmail() {
   return cleanEmail(process.env.PRIMARY_ADMIN_EMAIL || DEFAULT_PRIMARY_ADMIN_EMAIL) || DEFAULT_PRIMARY_ADMIN_EMAIL;
@@ -18,25 +23,6 @@ export function hashResetToken(token) {
 function createResetToken() {
   const token = crypto.randomBytes(32).toString('hex');
   return { token, tokenHash: hashResetToken(token) };
-}
-
-function getResetUrl(token) {
-  const configuredUrl = String(process.env.PUBLIC_APP_URL || process.env.CLIENT_URL || 'http://localhost:5173')
-    .split(',')[0]
-    .trim()
-    .replace(/\/$/, '');
-  return `${configuredUrl}/reset-password?token=${encodeURIComponent(token)}`;
-}
-
-function resetEmailBody({ name, token }) {
-  return `Hello ${name || 'there'},
-
-Use the secure link below to set a new Maxwell Properties password:
-${getResetUrl(token)}
-
-This link expires in ${RESET_TTL_MINUTES} minutes and can be used once. If you did not request this, you can ignore this email.
-
-Maxwell Properties`;
 }
 
 async function findUserByResetIdentity(db, { email, portal, userId }) {
@@ -52,21 +38,6 @@ async function expireOldApprovedRequest(tx, request) {
     return null;
   }
   return request;
-}
-
-async function queueResetEmail({ user, token, createdBy }) {
-  try {
-    return await queueEmail({
-      recipient: user.email,
-      notificationType: 'password_reset',
-      subject: 'Reset your Maxwell Properties password',
-      body: resetEmailBody({ name: user.name, token }),
-      createdBy,
-    });
-  } catch (error) {
-    console.error('Password reset email queue error:', error);
-    return null;
-  }
 }
 
 async function createResetRequest({ email, portal, userId = null, requestedBy = null, immediateAdmin = false }) {
@@ -86,7 +57,13 @@ async function createResetRequest({ email, portal, userId = null, requestedBy = 
     existing = await expireOldApprovedRequest(tx, existing);
 
     if (existing) {
-      result = { accepted: true, status: existing.status, requestId: existing.id, user };
+      result = {
+        accepted: true,
+        status: existing.status,
+        requestId: existing.id,
+        user,
+        rateLimited: existing.review_note === 'supabase_email_rate_limited',
+      };
       return;
     }
 
@@ -98,22 +75,43 @@ async function createResetRequest({ email, portal, userId = null, requestedBy = 
     result = { accepted: true, status: 'pending', requestId: request.lastInsertRowid, user };
 
     if (immediateAdmin) {
-      const { token, tokenHash } = createResetToken();
       await tx.prepare(`
         UPDATE password_reset_requests
-        SET status = 'approved', token_hash = ?,
+        SET status = 'approved', token_hash = NULL,
             token_expires_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 minute'),
             reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(tokenHash, RESET_TTL_MINUTES, user.id, request.lastInsertRowid);
+      `).run(SUPABASE_EMAIL_COOLDOWN_MINUTES, user.id, request.lastInsertRowid);
       result.status = 'approved';
-      result.token = token;
     }
   })();
 
-  if (result.token && result.user) {
-    result.emailJobId = await queueResetEmail({ user: result.user, token: result.token, createdBy: result.user.id });
+  if (result.status === 'approved' && result.user) {
+    try {
+      await requestSupabasePasswordReset(result.user.email);
+      result.emailDelivery = 'sent';
+    } catch (error) {
+      if (isSupabaseRateLimited(error)) {
+        // Keep the approved row until the cooldown expires. This is a
+        // database-backed guard across browsers and Vercel instances.
+        await getDb().prepare(`
+          UPDATE password_reset_requests
+          SET review_note = 'supabase_email_rate_limited'
+          WHERE id = ? AND status = 'approved'
+        `).run(result.requestId);
+        result.rateLimited = true;
+      } else {
+        await getDb().prepare(`
+          UPDATE password_reset_requests
+          SET status = 'cancelled', token_hash = NULL, token_expires_at = NULL,
+              reviewed_by = NULL, reviewed_at = NULL
+          WHERE id = ? AND status = 'approved'
+        `).run(result.requestId);
+      }
+      throw error;
+    }
   }
+
   return result;
 }
 
@@ -140,7 +138,7 @@ export async function approvePasswordReset(requestId, reviewedBy) {
   let result;
   await db.transaction(async (tx) => {
     const request = await tx.prepare(`
-      SELECT pr.*, u.email, u.name, u.role, u.is_active
+      SELECT pr.*, u.email, u.name, u.role, u.is_active, u.auth_user_id
       FROM password_reset_requests pr
       JOIN users u ON u.id = pr.user_id
       WHERE pr.id = ? AND pr.status = 'pending'
@@ -157,18 +155,33 @@ export async function approvePasswordReset(requestId, reviewedBy) {
       throw error;
     }
 
-    const { token, tokenHash } = createResetToken();
+    if (!request.auth_user_id) {
+      const error = new Error('This manager account is not linked to Supabase Auth yet. Edit the manager account and save it once to enable password recovery.');
+      error.code = 'AUTH_ACCOUNT_NOT_LINKED';
+      throw error;
+    }
     await tx.prepare(`
       UPDATE password_reset_requests
-      SET status = 'approved', token_hash = ?,
-          token_expires_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 minute'),
-          reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
+      SET status = 'approved', token_hash = NULL,
+           token_expires_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 minute'),
+           reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'pending'
-    `).run(tokenHash, RESET_TTL_MINUTES, reviewedBy, requestId);
-    result = { request, token };
+    `).run(RESET_TTL_MINUTES, reviewedBy, requestId);
+    result = { request };
   })();
 
-  result.emailJobId = await queueResetEmail({ user: result.request, token: result.token, createdBy: reviewedBy });
+  try {
+    await requestSupabasePasswordReset(result.request.email);
+    result.emailDelivery = 'sent';
+  } catch (error) {
+    await db.prepare(`
+      UPDATE password_reset_requests
+      SET status = 'pending', token_hash = NULL, token_expires_at = NULL,
+          reviewed_by = NULL, reviewed_at = NULL
+      WHERE id = ? AND status = 'approved'
+    `).run(requestId);
+    throw error;
+  }
   return result;
 }
 

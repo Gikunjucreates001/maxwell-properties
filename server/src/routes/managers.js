@@ -1,12 +1,14 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { getDb } from '../database.js';
 import { cleanEmail, cleanText, validatePassword } from '../utils/validation.js';
+import { createSupabaseAuthUser } from '../services/supabaseAuth.js';
 
 const router = express.Router();
 
 const selectManager = `
-  SELECT id, email, name, role, auth_provider, is_active, created_at
+  SELECT id, email, name, role, auth_provider, auth_user_id, is_active, created_at
   FROM users
   WHERE role = 'manager'
 `;
@@ -36,17 +38,21 @@ router.post('/', async (req, res) => {
     }
 
     const db = getDb();
+    const supabaseUser = await createSupabaseAuthUser({ email, password, name });
     const passwordHash = bcrypt.hashSync(password, 12);
     const result = await db.prepare(`
-      INSERT INTO users (email, password_hash, name, role, auth_provider, is_active)
-      VALUES (?, ?, ?, 'manager', 'password', 1)
-    `).run(email, passwordHash, name);
+      INSERT INTO users (email, password_hash, name, role, auth_provider, auth_user_id, is_active)
+      VALUES (?, ?, ?, 'manager', 'password', ?, 1)
+    `).run(email, passwordHash, name, supabaseUser.id);
 
     const manager = await db.prepare(`${selectManager} AND id = ?`).get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: manager });
   } catch (error) {
     if (error.code === '23505' || String(error.message).includes('UNIQUE constraint failed: users.email')) {
       return res.status(409).json({ success: false, error: 'A user with this email already exists' });
+    }
+    if (['SUPABASE_AUTH_NOT_CONFIGURED', 'SUPABASE_AUTH_ACCOUNT_NOT_CREATED', 'SUPABASE_AUTH_REQUEST_FAILED'].includes(error.code)) {
+      return res.status(503).json({ success: false, error: error.message || 'Supabase Auth could not create the manager account' });
     }
     console.error('Create manager error:', error);
     res.status(500).json({ success: false, error: 'Internal server error' });
@@ -64,6 +70,9 @@ router.put('/:id', async (req, res) => {
     const password = req.body?.password;
     if (!name) return res.status(400).json({ success: false, error: 'Name is required' });
     if (email === undefined) return res.status(400).json({ success: false, error: 'Enter a valid email address' });
+    if (manager.auth_user_id && email !== manager.email) {
+      return res.status(400).json({ success: false, error: 'A manager email linked to Supabase Auth cannot be changed here. Create a new manager account instead.' });
+    }
 
     let passwordHash = manager.password_hash;
     if (password !== undefined && password !== '') {
@@ -73,16 +82,32 @@ router.put('/:id', async (req, res) => {
     }
 
     const isActive = req.body?.is_active === undefined ? manager.is_active : req.body.is_active ? 1 : 0;
+    let authUserId = manager.auth_user_id;
+    if (!authUserId) {
+      const authPassword = password || `${crypto.randomBytes(18).toString('base64url')}A1!`;
+      try {
+        const supabaseUser = await createSupabaseAuthUser({ email, password: authPassword, name });
+        authUserId = supabaseUser.id;
+      } catch (error) {
+        if (error.code === 'SUPABASE_AUTH_NOT_CONFIGURED') throw error;
+        const linkError = new Error('This manager could not be linked to Supabase Auth. If the email already has a Supabase account, configure the server-only Supabase service key and try again.');
+        linkError.code = 'SUPABASE_AUTH_LINK_FAILED';
+        throw linkError;
+      }
+    }
     await db.prepare(`
-      UPDATE users SET name = ?, email = ?, password_hash = ?, is_active = ?
+      UPDATE users SET name = ?, email = ?, password_hash = ?, auth_user_id = ?, is_active = ?
       WHERE id = ? AND role = 'manager'
-    `).run(name, email, passwordHash, isActive, manager.id);
+    `).run(name, email, passwordHash, authUserId, isActive, manager.id);
 
     const updatedManager = await db.prepare(`${selectManager} AND id = ?`).get(manager.id);
     res.json({ success: true, data: updatedManager });
   } catch (error) {
     if (error.code === '23505' || String(error.message).includes('UNIQUE constraint failed: users.email')) {
       return res.status(409).json({ success: false, error: 'A user with this email already exists' });
+    }
+    if (['SUPABASE_AUTH_NOT_CONFIGURED', 'SUPABASE_AUTH_ACCOUNT_NOT_CREATED', 'SUPABASE_AUTH_REQUEST_FAILED', 'SUPABASE_AUTH_LINK_FAILED'].includes(error.code)) {
+      return res.status(503).json({ success: false, error: error.message || 'Supabase Auth could not link the manager account' });
     }
     console.error('Update manager error:', error);
     res.status(500).json({ success: false, error: 'Internal server error' });

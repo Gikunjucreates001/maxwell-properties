@@ -4,6 +4,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { getDb } from '../database.js';
 import { authenticateToken, generateAccessToken, generateRefreshToken, verifyRefreshToken, requireRole } from '../middleware/auth.js';
 import { validatePassword } from '../utils/validation.js';
+import { getSupabaseAuthUser } from '../services/supabaseAuth.js';
 import {
   approvePasswordReset,
   completePasswordReset,
@@ -78,13 +79,22 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/password-reset/request', async (req, res) => {
+  let portal = null;
   try {
-    const portal = getPortal(req.body?.portal);
+    portal = getPortal(req.body?.portal);
     if (!portal) return res.status(400).json({ success: false, error: 'Choose a valid sign-in portal' });
-
     // The response is intentionally the same whether the account exists. This
     // prevents the reset form from becoming an email-account discovery tool.
-    await requestPasswordReset({ email: req.body?.email, portal });
+    const email = req.body?.email;
+    // Keep both portals on the same server-controlled path. This applies the
+    // database duplicate gate and prevents repeated calls to Supabase Auth.
+    const resetRequest = await requestPasswordReset({ email, portal });
+    if (resetRequest?.rateLimited) {
+      return res.status(429).json({
+        success: false,
+        error: 'Supabase email limit reached. Please wait before requesting another reset email.',
+      });
+    }
     res.json({
       success: true,
       data: {
@@ -94,6 +104,20 @@ router.post('/password-reset/request', async (req, res) => {
       },
     });
   } catch (error) {
+    if (error.code === 'SUPABASE_AUTH_REQUEST_FAILED') {
+      console.error('Supabase password reset error:', error);
+      const rateLimited = error.status === 429 || /rate limit|too many/i.test(error.message || '');
+      return res.status(rateLimited ? 429 : 503).json({
+        success: false,
+        error: rateLimited
+          ? 'Supabase email limit reached. Please wait before requesting another reset email.'
+          : 'Supabase could not send the reset email. Check the Supabase Auth email and URL settings.',
+      });
+    }
+    if (error.code === 'SUPABASE_AUTH_NOT_CONFIGURED') {
+      console.error('Supabase password reset configuration error:', error);
+      return res.status(503).json({ success: false, error: 'Supabase password recovery is not configured yet.' });
+    }
     if (error.code === '23505' || String(error.message).includes('idx_one_open_password_reset_per_user')) {
       return res.json({
         success: true,
@@ -120,6 +144,54 @@ router.post('/password-reset/complete', async (req, res) => {
   }
 });
 
+router.post('/password-reset/sync-supabase', async (req, res) => {
+  try {
+    const authorization = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+    const accessToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    const passwordError = validatePassword(req.body?.newPassword);
+    if (passwordError) return res.status(400).json({ success: false, error: passwordError });
+
+    const authUser = await getSupabaseAuthUser(accessToken);
+    const email = typeof authUser?.email === 'string' ? authUser.email.trim().toLowerCase() : '';
+    if (!authUser?.id || !email) return res.status(401).json({ success: false, error: 'The Supabase recovery session is invalid' });
+
+    const db = getDb();
+    const user = await db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
+    if (!user || !['admin', 'manager'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'This email is not an active Maxwell Properties account' });
+    }
+    if (user.role === 'admin' && user.email !== getPrimaryAdminEmail()) {
+      return res.status(403).json({ success: false, error: 'This account is not authorized for the administrator portal' });
+    }
+    if (user.auth_user_id && user.auth_user_id !== authUser.id) {
+      return res.status(403).json({ success: false, error: 'This Supabase account is not linked to the Maxwell account' });
+    }
+
+    const passwordHash = bcrypt.hashSync(req.body.newPassword, 12);
+    await db.transaction(async (tx) => {
+      await tx.prepare(`
+        UPDATE users
+        SET password_hash = ?, auth_user_id = ?,
+            auth_provider = CASE WHEN auth_provider = 'google' THEN 'password' ELSE auth_provider END
+        WHERE id = ? AND is_active = 1
+      `).run(passwordHash, authUser.id, user.id);
+      await tx.prepare(`
+        UPDATE password_reset_requests
+        SET status = 'completed', token_hash = NULL, token_expires_at = NULL, completed_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND status = 'approved'
+      `).run(user.id);
+    })();
+
+    res.json({ success: true, data: { message: 'Password updated successfully. You can now sign in.' } });
+  } catch (error) {
+    if (['SUPABASE_AUTH_NOT_CONFIGURED', 'SUPABASE_AUTH_SESSION_REQUIRED', 'SUPABASE_AUTH_REQUEST_FAILED'].includes(error.code)) {
+      return res.status(error.code === 'SUPABASE_AUTH_REQUEST_FAILED' ? 401 : 503).json({ success: false, error: 'The Supabase recovery session is invalid or expired. Request a new reset email.' });
+    }
+    console.error('Sync Supabase password error:', error);
+    res.status(500).json({ success: false, error: 'Unable to finish the password reset' });
+  }
+});
+
 router.get('/password-reset/requests', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const status = typeof req.query.status === 'string' ? req.query.status : 'open';
@@ -136,7 +208,11 @@ router.post('/password-reset/requests/:id/approve', authenticateToken, requireRo
     await approvePasswordReset(req.params.id, req.user.id);
     res.json({ success: true, data: { message: 'Reset email sent to the manager' } });
   } catch (error) {
-    if (['NOT_FOUND', 'INVALID_REQUEST'].includes(error.code)) {
+    if (['SUPABASE_AUTH_NOT_CONFIGURED', 'SUPABASE_AUTH_REQUEST_FAILED'].includes(error.code)) {
+      console.error('Approved Supabase password reset email error:', error);
+      return res.status(503).json({ success: false, error: 'Supabase could not send the manager reset email. Check the Supabase Auth email and URL settings.' });
+    }
+    if (['NOT_FOUND', 'INVALID_REQUEST', 'AUTH_ACCOUNT_NOT_LINKED'].includes(error.code)) {
       return res.status(error.code === 'NOT_FOUND' ? 404 : 400).json({ success: false, error: error.message });
     }
     console.error('Approve password reset error:', error);
