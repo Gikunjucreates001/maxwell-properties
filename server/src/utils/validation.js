@@ -1,4 +1,4 @@
-export const PROPERTY_TYPES = ['rental', 'airbnb', 'apartment'];
+export const PROPERTY_TYPES = ['rental', 'airbnb', 'apartment', 'deferred_residence'];
 export const PROPERTY_STATUSES = ['active', 'inactive'];
 export const TENANT_TYPES = ['long-term', 'short-term'];
 export const TENANT_STATUSES = ['active', 'inactive'];
