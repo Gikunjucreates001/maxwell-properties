@@ -107,7 +107,7 @@ router.post('/', async (req, res) => {
     if (isApartmentProperty(property.type)) {
       if (!unit_id || !Number.isInteger(unit_id) || !await db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(unit_id, property_id)) return res.status(400).json({ success: false, error: 'Choose the House ID affected by this issue' });
     } else if (unit_id) {
-      return res.status(400).json({ success: false, error: 'Airbnb issues do not use House IDs' });
+      return res.status(400).json({ success: false, error: 'This property type does not use House IDs' });
     }
     const finalResolvedDate = (status === 'resolved' || status === 'closed') && !resolved_date ? today() : resolved_date;
 
@@ -178,7 +178,7 @@ router.put('/:id', async (req, res) => {
     if (isApartmentProperty(property.type)) {
       if (!unit_id || !Number.isInteger(unit_id) || !await db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(unit_id, property_id)) return res.status(400).json({ success: false, error: 'Choose the House ID affected by this issue' });
     } else if (unit_id) {
-      return res.status(400).json({ success: false, error: 'Airbnb issues do not use House IDs' });
+      return res.status(400).json({ success: false, error: 'This property type does not use House IDs' });
     }
     const payload = { property_id: Number(property_id), unit_id, title, description, priority, status, category, reported_date, resolved_date, notes, repair_cost: repairCost.value };
     if (req.user.role === 'manager') {
