@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Users, AlertCircle, Edit, Trash2, Loader2, Home } from 'lucide-react';
 import StatusBadge from './StatusBadge';
+import { getPropertyTypeLabel, isApartmentProperty } from '../utils/propertyTypes';
 
 const PropertyCard = ({ property, onEdit, onDelete, deleting = false }) => {
   const navigate = useNavigate();
@@ -34,7 +35,7 @@ const PropertyCard = ({ property, onEdit, onDelete, deleting = false }) => {
 
         <div className="mb-4">
           <span className="inline-block px-2.5 py-1 bg-gray-100 text-gray-700 text-xs font-medium rounded-full">
-            {property.type === 'rental' ? 'Apartment' : property.type}
+            {getPropertyTypeLabel(property.type)}
           </span>
         </div>
 
@@ -63,7 +64,7 @@ const PropertyCard = ({ property, onEdit, onDelete, deleting = false }) => {
               <AlertCircle size={16} className="mr-1.5" />
               <span>{property.open_issues_count || 0} Issues</span>
             </div>
-            {['apartment', 'rental'].includes(property.type) && (
+            {isApartmentProperty(property.type) && (
               <div className="flex items-center text-gray-600">
                 <Home size={16} className="mr-1.5" />
                 <span>{property.vacant_unit_count || 0}/{property.unit_count || 0} Vacant</span>
