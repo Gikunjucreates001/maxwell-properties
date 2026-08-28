@@ -5,6 +5,7 @@ import client from '../api/client';
 import StatusBadge from '../components/StatusBadge';
 import { Loader2, ArrowLeft, MapPin, Building2, Banknote, Users, AlertTriangle, Home, Receipt } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getPropertyTypeLabel, isApartmentProperty } from '../utils/propertyTypes';
 
 const PropertyDetail = () => {
   const { id } = useParams();
@@ -48,13 +49,9 @@ const PropertyDetail = () => {
     { id: 'tenants', name: 'Tenants', icon: Users, count: property.tenants?.length || 0 },
     { id: 'payments', name: 'Payments', icon: Banknote, count: property.recent_payments?.length || 0 },
     { id: 'issues', name: 'Issues', icon: AlertTriangle, count: property.open_issues?.length || 0 },
-    ...(isApartment(property) ? [{ id: 'units', name: 'House Units', icon: Home, count: property.units?.length || 0 }] : []),
+    ...(isApartmentProperty(property) ? [{ id: 'units', name: 'House Units', icon: Home, count: property.units?.length || 0 }] : []),
     { id: 'expenses', name: 'Expenses', icon: Receipt, count: property.expenses?.length || 0 },
   ];
-
-  function isApartment(currentProperty) {
-    return ['apartment', 'rental'].includes(currentProperty?.type);
-  }
 
   return (
     <Layout title="Property Details">
@@ -78,7 +75,7 @@ const PropertyDetail = () => {
                 <h1 className="text-2xl font-bold text-gray-900">{property.name}</h1>
                 <StatusBadge status={property.status || 'active'} />
                 <span className="px-2.5 py-0.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-full capitalize">
-                  {property.type === 'rental' ? 'Apartment' : property.type}
+                  {getPropertyTypeLabel(property.type)}
                 </span>
               </div>
               <div className="flex items-center text-gray-500">
@@ -254,7 +251,7 @@ const PropertyDetail = () => {
           </div>
         )}
 
-        {activeTab === 'units' && isApartment(property) && (
+        {activeTab === 'units' && isApartmentProperty(property) && (
           <div>
             <div className="flex items-center justify-between border-b border-gray-200 p-4"><h3 className="text-lg font-medium">House Units</h3><button onClick={() => navigate('/units')} className="text-sm font-medium text-primary hover:underline">Manage House Units</button></div>
             {property.units?.length ? <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">{property.units.map((unit) => <div key={unit.id} className="rounded-lg border border-gray-200 p-4"><div className="flex items-start justify-between"><h4 className="text-lg font-semibold text-gray-900">{unit.house_id}</h4><StatusBadge status={unit.status === 'ready' ? 'Ready' : 'Maintenance'} /></div><p className="mt-3 text-sm text-gray-600">Rent: <strong className="text-gray-900">KES {Number(unit.rent_amount).toLocaleString()}</strong></p><p className="text-sm text-gray-600">Water: <span className="capitalize">{unit.water_billing_type}</span>{unit.water_billing_type !== 'included' && ` · KES ${Number(unit.water_rate).toLocaleString()}`}</p><p className="mt-2 text-sm font-medium text-gray-700">{unit.tenant_id ? `Occupied by ${unit.tenant_name}` : 'Vacant'}</p></div>)}</div> : <div className="p-8 text-center text-gray-500">No House Units configured for this property.</div>}
