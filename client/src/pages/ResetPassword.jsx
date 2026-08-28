@@ -8,6 +8,17 @@ import client from '../api/client';
 import { validatePassword } from '../utils/passwordPolicy';
 import { supabase } from '../lib/supabase';
 
+function getResetErrorMessage(error) {
+  const message = error?.response?.data?.error || error?.message || error?.error_description || error?.msg || '';
+  if (/same password|different from the old password/i.test(message)) {
+    return 'Choose a new password that is different from your current password.';
+  }
+  if (/session missing|invalid.*session|expired|jwt/i.test(message)) {
+    return 'This reset link has expired. Request a new password-reset email and use the newest link.';
+  }
+  return message || 'Unable to reset your password. Please request a new reset link and try again.';
+}
+
 const ResetPassword = () => {
   const [searchParams] = useSearchParams();
   const token = useMemo(() => searchParams.get('token') || '', [searchParams]);
@@ -62,7 +73,7 @@ const ResetPassword = () => {
       setComplete(true);
       toast.success('Password updated successfully');
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Unable to reset your password');
+      toast.error(getResetErrorMessage(error));
     } finally {
       setIsSaving(false);
     }
