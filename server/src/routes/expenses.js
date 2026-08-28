@@ -21,7 +21,7 @@ async function validateExpense(db, payload) {
   if (!Number.isFinite(payload.amount) || payload.amount <= 0) return 'Expense amount must be greater than zero';
   if (!isValidDate(payload.expense_date)) return 'Expense date must be valid';
   if (payload.unit_id) {
-    if (!isApartmentProperty(property.type)) return 'Airbnb expenses do not use House IDs';
+    if (!isApartmentProperty(property.type)) return 'This property type does not use House IDs';
     if (!await db.prepare('SELECT id FROM units WHERE id = ? AND property_id = ?').get(payload.unit_id, payload.property_id)) return 'Selected House ID was not found';
   }
   return null;
