@@ -5,6 +5,7 @@ import Modal from '../components/Modal';
 import client from '../api/client';
 import { Plus, Loader2, Building2, Search, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { PROPERTY_TYPE_OPTIONS } from '../utils/propertyTypes';
 
 const Properties = () => {
   const [properties, setProperties] = useState([]);
@@ -167,8 +168,7 @@ const Properties = () => {
             <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Filter properties by type" className="w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 outline-none focus:border-primary">
               <option value="">All property types</option>
               <option value="rental">Legacy rental</option>
-              <option value="airbnb">Airbnb</option>
-              <option value="apartment">Apartment</option>
+              {PROPERTY_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </div>
         </div>
@@ -240,8 +240,7 @@ const Properties = () => {
                 onChange={handleInputChange}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-primary focus:border-primary outline-none bg-white"
               >
-                <option value="apartment">Apartment</option>
-                <option value="airbnb">Airbnb</option>
+                {PROPERTY_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 {formData.type === 'rental' && <option value="rental">Legacy rental</option>}
               </select>
             </div>
@@ -250,12 +249,12 @@ const Properties = () => {
               <input 
                 type="number"
                 name="monthly_rent"
-                required={formData.type === 'airbnb'}
+                required={['airbnb', 'deferred_residence'].includes(formData.type)}
                 min="0"
                 value={formData.monthly_rent}
                 onChange={handleInputChange}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-primary focus:border-primary outline-none"
-                placeholder={formData.type === 'airbnb' ? 'e.g. 45000' : 'Set rent on each House Unit'}
+                placeholder={['airbnb', 'deferred_residence'].includes(formData.type) ? 'e.g. 45000' : 'Set rent on each House Unit'}
               />
             </div>
           </div>
